@@ -1,0 +1,21 @@
+opam-version: "1.2"
+name: "binocle"
+maintainer: "rixed-github@happyleptic.org"
+homepage: "http://github.com/rixed/binocle/"
+bug-reports: "https://github.com/rixed/binocle/issues"
+dev-repo: "https://github.com/rixed/binocle.git"
+
+build: [
+  [make "all"]
+]
+install: [
+  [make "install"]
+]
+remove: [
+  [make "uninstall"]
+]
+
+depends: [
+  "ocamlfind"
+  "qtest" {test & >= "2.0.0"}
+]
