@@ -16,7 +16,7 @@ SOURCES = \
 PACKAGES = batteries
 
 INSTALLED = \
-	META Binocle.cma \
+	META Binocle.cma $(BINOCLE_SOURCES:.ml=.cmi) \
 	Binocle.cmxa Binocle.a $(BINOCLE_SOURCES:.ml=.cmx)
 
 all: $(INSTALLED)
