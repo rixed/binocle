@@ -64,7 +64,7 @@ struct
       help : string ;
       per_labels : (label list, T.t) Hashtbl.t }
 
-  let labeled_observation make_measure observe t labels v =
+  let labeled_observation make_measure observe t ?(labels=[]) v =
     let labels = List.fast_sort Pervasives.compare labels in
     match Hashtbl.find t.per_labels labels with
     | exception Not_found ->
@@ -289,9 +289,9 @@ end
 (*$R
   let query_count =
     IntCounter.make "test_counter" "Demo of a labelled counter" in
-  IntCounter.add query_count ["context","test"; "status","ok"] 40 ;
-  IntCounter.add query_count ["context","test"; "status","ok"] 2 ;
-  IntCounter.add query_count ["context","test"; "status","nok"] 7 ;
+  IntCounter.add query_count ~labels:["context","test"; "status","ok"] 40 ;
+  IntCounter.add query_count ~labels:["context","test"; "status","ok"] 2 ;
+  IntCounter.add query_count ~labels:["context","test"; "status","nok"] 7 ;
   let s = BatIO.to_string (IntCounter.print 1500136019.012674) query_count in
   assert_equal ~printer:BatPervasives.identity
     "# HELP test_counter Demo of a labelled counter\n\
@@ -300,9 +300,9 @@ end
 
   let response_time =
     Histogram.make "test_histo" "Demo of a labelled histogram" (Histogram.linear_buckets 1.) in
-  Histogram.add response_time ["context","test"; "status","ok"] 0.1 ;
-  Histogram.add response_time ["context","test"; "status","ok"] 0.12 ;
-  Histogram.add response_time ["context","test"; "status","ok"] 1.5 ;
+  Histogram.add response_time ~labels:["context","test"; "status","ok"] 0.1 ;
+  Histogram.add response_time ~labels:["context","test"; "status","ok"] 0.12 ;
+  Histogram.add response_time ~labels:["context","test"; "status","ok"] 1.5 ;
   let s = BatIO.to_string (Histogram.print 1500136019.000001) response_time in
   assert_equal ~printer:BatPervasives.identity
     "# HELP test_histo Demo of a labelled histogram\n\
@@ -313,7 +313,7 @@ end
 
   let ram_usage =
     IntGauge.make "test_gauge" "Demo of a labelled gauge" in
-  IntGauge.set ram_usage ["context","test"] 42 ;
+  IntGauge.set ram_usage ~labels:["context","test"] 42 ;
   let s = BatIO.to_string (IntGauge.print 1500136019.000001) ram_usage in
   assert_equal ~printer:BatPervasives.identity
     "# HELP test_gauge Demo of a labelled gauge\n\
