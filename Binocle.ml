@@ -1,6 +1,5 @@
 open Batteries
 
-
 type measure = MFloat of float
              | MInt of int
              | MString of string
@@ -74,6 +73,9 @@ struct
     | prev ->
       observe prev v
 
+  let get ?(labels=[]) t =
+    Hashtbl.find t.per_labels labels
+
   let export_all export_measure t =
     Hashtbl.fold (fun labels m lst ->
         match export_measure m with
@@ -121,6 +123,9 @@ struct
     and make () = ref 0 in
     L.labeled_observation make observe t
 
+  (* Retrieve the current value *)
+  let get ?labels t = !(L.get ?labels t)
+
   (* Print the value kind-of Prometheus way *)
   let print now oc t =
     L.print (print_val (fun m -> string_of_int !m)) now oc t
@@ -144,6 +149,8 @@ struct
     and make () = ref 0. in
     L.labeled_observation make observe t
 
+  let get ?labels t = !(L.get ?labels t)
+
   let print now oc t =
     L.print (print_val (fun m -> string_of_float !m)) now oc t
 end
@@ -163,6 +170,8 @@ struct
     and make () = ref None in
     L.labeled_observation make observe t
 
+  let get ?labels t = !(L.get ?labels t)
+
   let print now oc t =
     L.print (print_val_option string_of_int) now oc t
 end
@@ -179,6 +188,8 @@ struct
     let observe m v = m := Some v
     and make () = ref None in
     L.labeled_observation make observe t
+
+  let get ?labels t = !(L.get ?labels t)
 
   let print now oc t =
     L.print (print_val_option string_of_float) now oc t
@@ -197,6 +208,8 @@ struct
     and make () = ref None in
     L.labeled_observation make observe t
 
+  let get ?labels t = !(L.get ?labels t)
+
   let print now oc t =
     L.print (print_val_option identity) now oc t
 end
@@ -208,6 +221,8 @@ struct
   let make s name help =
     let export m = Some (Gauge, MString m) in
     s, L.make export name help
+
+  let get ?labels t = L.get ?labels t
 
   let print now oc t =
     L.print (print_val identity) now oc t
