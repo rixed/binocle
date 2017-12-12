@@ -124,7 +124,8 @@ struct
     L.labeled_observation make observe t
 
   (* Retrieve the current value *)
-  let get ?labels t = !(L.get ?labels t)
+  let get ?labels t =
+    try !(L.get ?labels t) with Not_found -> 0
 
   (* Print the value kind-of Prometheus way *)
   let print now oc t =
@@ -149,7 +150,8 @@ struct
     and make () = ref 0. in
     L.labeled_observation make observe t
 
-  let get ?labels t = !(L.get ?labels t)
+  let get ?labels t =
+    try !(L.get ?labels t) with Not_found -> 0.
 
   let print now oc t =
     L.print (print_val (fun m -> string_of_float !m)) now oc t
@@ -170,7 +172,8 @@ struct
     and make () = ref None in
     L.labeled_observation make observe t
 
-  let get ?labels t = !(L.get ?labels t)
+  let get ?labels t =
+    try !(L.get ?labels t) with Not_found -> None
 
   let print now oc t =
     L.print (print_val_option string_of_int) now oc t
@@ -189,7 +192,8 @@ struct
     and make () = ref None in
     L.labeled_observation make observe t
 
-  let get ?labels t = !(L.get ?labels t)
+  let get ?labels t =
+    try !(L.get ?labels t) with Not_found -> None
 
   let print now oc t =
     L.print (print_val_option string_of_float) now oc t
@@ -208,7 +212,8 @@ struct
     and make () = ref None in
     L.labeled_observation make observe t
 
-  let get ?labels t = !(L.get ?labels t)
+  let get ?labels t =
+    try !(L.get ?labels t) with Not_found -> None
 
   let print now oc t =
     L.print (print_val_option identity) now oc t
