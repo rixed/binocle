@@ -33,6 +33,14 @@ let round_to_int f =
   ~-42 (round_to_int ~-.41.9)
  *)
 
+let wrap v = if v >= 0 then v else v - min_int
+
+(*$= wrap & ~printer:string_of_int
+  9 (wrap (3 + 6))
+  0 (wrap (max_int - 5 + 6))
+  2 (wrap (max_int - 5 + 8))
+ *)
+
 let now_us now =
   let now_s = int_of_float now in
   let now_us = (now -. float_of_int now_s) *. 1_000_000.0 |> round_to_int in
@@ -101,7 +109,8 @@ struct
     Printf.fprintf oc "\n"
 end
 
-(* An int counter is the simplest of all measures *)
+(* An int counter is the simplest of all measures.
+ * Int counters are unsigned (wrap around back to 0). *)
 module IntCounter =
 struct
   module L = Labeled (struct type t = int ref end)
@@ -113,7 +122,7 @@ struct
 
   (* Add an observation to this measure *)
   let add t =
-    let observe m v = m := !m + v
+    let observe m v = m := wrap (!m + v)
     and make () = ref 0 in
     L.labeled_observation make observe t
 
@@ -132,6 +141,9 @@ struct
     L.print (print_val (fun m -> string_of_int !m)) now oc t
 end
 
+(* Float counters do not wrap around. Floats make actually very poor counters
+ * as their accuracy decrease as the value raises. Think twice before using
+ * them! *)
 module FloatCounter =
 struct
   module L = Labeled (struct type t = float ref end)

@@ -1,5 +1,5 @@
 description = "Simplest instrumentation lib for OCaml"
-version = "0.2"
+version = "0.3"
 archive(byte) = "Binocle.cma"
 archive(native) = "Binocle.cmxa"
 requires = "findlib batteries"
