@@ -17,7 +17,7 @@ remove: [
 ]
 
 depends: [
-  "ocamlfind"
+  "ocamlfind" {build}
   "batteries"
   "qtest" {test & >= "2.0.0"}
 ]
