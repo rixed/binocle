@@ -21,48 +21,53 @@ type metric =
 let all_measures : (string, (unit -> metric list)) Hashtbl.t =
   Hashtbl.create 71
 
-let round_to_int f =
-  let frac, _ = modf f
-  and n = int_of_float f in
-  if abs_float frac <= 0.5 then n else if f < 0. then n-1 else n+1
+module Priv_ =
+struct
+  (*$< Priv_*)
+  let round_to_int f =
+    let frac, _ = modf f
+    and n = int_of_float f in
+    if abs_float frac <= 0.5 then n else if f < 0. then n-1 else n+1
 
-(*$= round_to_int & ~printer:string_of_int
-  42 (round_to_int 42.1)
-  42 (round_to_int 41.9)
-  ~-42 (round_to_int ~-.42.1)
-  ~-42 (round_to_int ~-.41.9)
- *)
+  (*$= round_to_int & ~printer:string_of_int
+    42 (round_to_int 42.1)
+    42 (round_to_int 41.9)
+    ~-42 (round_to_int ~-.42.1)
+    ~-42 (round_to_int ~-.41.9)
+   *)
 
-let wrap v = if v >= 0 then v else v - min_int
+  let wrap v = if v >= 0 then v else v - min_int
 
-(*$= wrap & ~printer:string_of_int
-  9 (wrap (3 + 6))
-  0 (wrap (max_int - 5 + 6))
-  2 (wrap (max_int - 5 + 8))
- *)
+  (*$= wrap & ~printer:string_of_int
+    9 (wrap (3 + 6))
+    0 (wrap (max_int - 5 + 6))
+    2 (wrap (max_int - 5 + 8))
+   *)
 
-let now_us now =
-  let now_s = int_of_float now in
-  let now_us = (now -. float_of_int now_s) *. 1_000_000.0 |> round_to_int in
-  Printf.sprintf "%d%06d" now_s now_us
+  let now_us now =
+    let now_s = int_of_float now in
+    let now_us = (now -. float_of_int now_s) *. 1_000_000.0 |> round_to_int in
+    Printf.sprintf "%d%06d" now_s now_us
 
-(*$= now_us & ~printer:BatPervasives.identity
-  "1395066363000" (now_us 1395066.363)
-  "1395066363042" (now_us 1395066.363042)
-  "1395066000042" (now_us 1395066.000042)
- *)
+  (*$= now_us & ~printer:BatPervasives.identity
+    "1395066363000" (now_us 1395066.363)
+    "1395066363042" (now_us 1395066.363042)
+    "1395066000042" (now_us 1395066.000042)
+   *)
 
-let print_val to_string name labels now oc x =
-  Printf.fprintf oc "%s{" name ;
-  List.iteri (fun i label ->
-      Printf.fprintf oc "%s%a" (if i > 0 then "," else "") print_label label
-    ) labels ;
-  Printf.fprintf oc "} %s %s\n" (to_string x) now
+  let print_val to_string name labels now oc x =
+    Printf.fprintf oc "%s{" name ;
+    List.iteri (fun i label ->
+        Printf.fprintf oc "%s%a" (if i > 0 then "," else "") print_label label
+      ) labels ;
+    Printf.fprintf oc "} %s %s\n" (to_string x) now
 
-let print_val_option to_string name labels now oc xr =
-  match !xr with
-  | Some x -> print_val to_string name labels now oc x
-  | None -> ()
+  let print_val_option to_string name labels now oc xr =
+    match !xr with
+    | Some x -> print_val to_string name labels now oc x
+    | None -> ()
+  (*$>*)
+end
 
 module Labeled (T : sig type t end) =
 struct
@@ -101,7 +106,7 @@ struct
 
   (* Kind-of following Prometheus style *)
   let print print_measure now oc t =
-    let now_us = now_us now in
+    let now_us = Priv_.now_us now in
     Printf.fprintf oc "# HELP %s %s\n" t.name t.help ;
     Hashtbl.iter (fun labels m ->
         print_measure t.name labels now_us oc m
@@ -122,9 +127,11 @@ struct
 
   (* Add an observation to this measure *)
   let add t =
-    let observe m v = m := wrap (!m + v)
+    let observe m v = m := Priv_.wrap (!m + v)
     and make () = ref 0 in
     L.labeled_observation make observe t
+
+  let inc t = add t 1
 
   (* Directly set the value of the measure *)
   let set t =
@@ -138,7 +145,7 @@ struct
 
   (* Print the value kind-of Prometheus way *)
   let print now oc t =
-    L.print (print_val (fun m -> string_of_int !m)) now oc t
+    L.print (Priv_.print_val (fun m -> string_of_int !m)) now oc t
 end
 
 (* Float counters do not wrap around. Floats make actually very poor counters
@@ -166,7 +173,7 @@ struct
     try !(L.get ?labels t) with Not_found -> 0.
 
   let print now oc t =
-    L.print (print_val (fun m -> string_of_float !m)) now oc t
+    L.print (Priv_.print_val (fun m -> string_of_float !m)) now oc t
 end
 
 (* TODO: A special kind of gauge that keep only the min/max? *)
@@ -188,7 +195,7 @@ struct
     try !(L.get ?labels t) with Not_found -> None
 
   let print now oc t =
-    L.print (print_val_option string_of_int) now oc t
+    L.print (Priv_.print_val_option string_of_int) now oc t
 end
 
 module FloatGauge =
@@ -208,7 +215,7 @@ struct
     try !(L.get ?labels t) with Not_found -> None
 
   let print now oc t =
-    L.print (print_val_option string_of_float) now oc t
+    L.print (Priv_.print_val_option string_of_float) now oc t
 end
 
 module StringValue =
@@ -228,7 +235,7 @@ struct
     try !(L.get ?labels t) with Not_found -> None
 
   let print now oc t =
-    L.print (print_val_option identity) now oc t
+    L.print (Priv_.print_val_option identity) now oc t
 end
 
 module StringConst =
@@ -242,7 +249,7 @@ struct
   let get ?labels t = L.get ?labels t
 
   let print now oc t =
-    L.print (print_val identity) now oc t
+    L.print (Priv_.print_val identity) now oc t
 end
 
 module Timestamp = FloatGauge
@@ -297,11 +304,11 @@ struct
         List.fold_left (fun count (ma, c) ->
             let count = count + c in
             let labels = ("le", string_of_float ma) :: labels in
-            print_val string_of_int name_bucket labels now_us oc count ;
+            Priv_.print_val string_of_int name_bucket labels now_us oc count ;
             count
           ) 0 buckets in
-      print_val string_of_float (name ^"_sum") labels now_us oc histo.sum ;
-      print_val string_of_int (name ^"_count") labels now_us oc count in
+      Priv_.print_val string_of_float (name ^"_sum") labels now_us oc histo.sum ;
+      Priv_.print_val string_of_int (name ^"_count") labels now_us oc count in
     L.print print_measure now oc t
 
   (* bucket_of_value ideas: *)
