@@ -29,6 +29,8 @@ Binocle.cmxa: $(BINOCLE_SOURCES:.ml=.cmx)
 Binocle.cma: $(BINOCLE_SOURCES:.ml=.cmo)
 	$(OCAMLC) $(OCAMLFLAGS) -a $(filter %.cmo, $^) -o $@
 
+Binocle.a: Binocle.cmxa
+
 clean-spec:
 
 distclean-spec:
