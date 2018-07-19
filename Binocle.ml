@@ -1,15 +1,18 @@
 open Batteries
 
-type measure = MFloat of float
-             | MInt of int
-             | MString of string
-             | MHistogram of (float * float * int) array
+type measure =
+  | MFloat of float
+  | MInt of int
+  | MString of string
+  | MHistogram of (float * float * int) array
 
 type kind = Counter | Gauge | Histogram
 
 type label = string * string
   [@@ppp PPP_OCaml]
+
 let print_label oc (l, v) = Printf.fprintf oc "%s=%S" l v
+
 let print_labels oc labels =
   List.print ~first:"{" ~last:"}" ~sep:"," print_label oc labels
 
