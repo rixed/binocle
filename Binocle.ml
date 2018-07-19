@@ -8,6 +8,7 @@ type measure = MFloat of float
 type kind = Counter | Gauge | Histogram
 
 type label = string * string
+  [@@ppp PPP_OCaml]
 let print_label oc (l, v) = Printf.fprintf oc "%s=%S" l v
 let print_labels oc labels =
   List.print ~first:"{" ~last:"}" ~sep:"," print_label oc labels
@@ -69,22 +70,48 @@ struct
   (*$>*)
 end
 
-module Labeled (T : sig type t end) =
+module Labeled (T : sig type t val t_ppp_ocaml : t PPP.t end) =
 struct
+  type per_labels = (label list, T.t) Hashtbl.t
+    [@@ppp PPP_OCaml]
+
   type t =
     { name : string ;
       help : string ;
-      per_labels : (label list, T.t) Hashtbl.t }
+      save_file : string option ;
+      mutable per_labels : per_labels }
+
+  let of_file fname =
+    let openflags = [ Open_rdonly; Open_text ] in
+    let ic = Legacy.open_in_gen openflags 0o644 fname in
+    finally
+      (fun () -> Legacy.close_in ic)
+      (PPP.of_in_channel_exc per_labels_ppp_ocaml) ic
+
+  let to_file fname v =
+    let openflags = [ Open_wronly; Open_creat; Open_trunc; Open_text ] in
+    let oc = Pervasives.open_out_gen openflags 0o644 fname in
+    finally
+      (fun () -> Pervasives.close_out oc)
+      (PPP.to_out_channel per_labels_ppp_ocaml oc) v
 
   let labeled_observation make_measure observe t ?(labels=[]) v =
     let labels = List.fast_sort Pervasives.compare labels in
-    match Hashtbl.find t.per_labels labels with
+    (* Maybe another program changed the saved value. If so, reload it
+     * before proceeding: *)
+    Option.may (fun fname ->
+      t.per_labels <- of_file fname
+    ) t.save_file ;
+    (match Hashtbl.find t.per_labels labels with
     | exception Not_found ->
       let m = make_measure () in
       observe m v ;
       Hashtbl.add t.per_labels labels m
     | prev ->
-      observe prev v
+      observe prev v) ;
+    Option.may (fun fname ->
+      to_file fname t.per_labels
+    ) t.save_file
 
   let get ?(labels=[]) t =
     Hashtbl.find t.per_labels labels
@@ -97,10 +124,26 @@ struct
           { name = t.name ; labels ; kind ; measure } :: lst
       ) t.per_labels []
 
-  let make export_measure name help =
-    let t =
-      { name ; help ; per_labels = Hashtbl.create 17 } in
+  (* If [save_dir] is set then current value of the counter will be saved
+   * in this file at exit, and loaded from it at creation: *)
+  let make export_measure ?save_dir name help =
+    let save_file = Option.map (fun d -> d ^"/"^ name) save_dir in
     assert (not (Hashtbl.mem all_measures name)) ;
+    let make_new () =
+        { name ; help ; per_labels = Hashtbl.create 17 ; save_file } in
+    let t =
+      match save_file with
+      | None -> make_new ()
+      | Some fname ->
+          let t =
+            try { name ; help ; per_labels = of_file fname ; save_file }
+            with Sys_error _ ->
+              let t = make_new () in
+              to_file fname t.per_labels ; (* Better crash now than at_exit *)
+              t in
+          at_exit (fun () -> to_file fname t.per_labels) ;
+          t
+    in
     Hashtbl.add all_measures name (fun () -> export_all export_measure t) ;
     t
 
@@ -118,7 +161,7 @@ end
  * Int counters are unsigned (wrap around back to 0). *)
 module IntCounter =
 struct
-  module L = Labeled (struct type t = int ref end)
+  module L = Labeled (struct type t = int ref [@@ppp PPP_OCaml] end)
 
   (* Build an int counter *)
   let make =
@@ -139,7 +182,8 @@ struct
     and make () = ref 0 in
     L.labeled_observation make observe t
 
-  (* Retrieve the current value *)
+  (* Retrieve the current value (notwithstanding other programs updating the
+   * same persisted metric) *)
   let get ?labels t =
     try !(L.get ?labels t) with Not_found -> 0
 
@@ -153,7 +197,7 @@ end
  * them! *)
 module FloatCounter =
 struct
-  module L = Labeled (struct type t = float ref end)
+  module L = Labeled (struct type t = float ref [@@ppp PPP_OCaml] end)
 
   let make =
     let export m = Some (Counter, MFloat !m) in
@@ -180,7 +224,7 @@ end
 
 module IntGauge =
 struct
-  module L = Labeled (struct type t = int option ref end)
+  module L = Labeled (struct type t = int option ref [@@ppp PPP_OCaml] end)
 
   let make =
     let export m = Option.map (fun m -> Gauge, MInt m) !m in
@@ -200,7 +244,7 @@ end
 
 module FloatGauge =
 struct
-  module L = Labeled (struct type t = float option ref end)
+  module L = Labeled (struct type t = float option ref [@@ppp PPP_OCaml] end)
 
   let make =
     let export m = Option.map (fun m -> Gauge, MFloat m) !m in
@@ -220,7 +264,7 @@ end
 
 module StringValue =
 struct
-  module L = Labeled (struct type t = string option ref end)
+  module L = Labeled (struct type t = string option ref [@@ppp PPP_OCaml] end)
 
   let make =
     let export m = Option.map (fun m -> Gauge, MString m) !m in
@@ -240,7 +284,7 @@ end
 
 module StringConst =
 struct
-  module L = Labeled (struct type t = string end)
+  module L = Labeled (struct type t = string [@@ppp PPP_OCaml] end)
 
   let make s name help =
     let export m = Some (Gauge, MString m) in
@@ -262,10 +306,11 @@ struct
      * and number of measurement in this bucket (int): *)
     counts : (float, float * int) Hashtbl.t ;
     mutable sum : float (* total sum of all observations *) }
+    [@@ppp PPP_OCaml]
 
-  module L = Labeled (struct type t = histo end)
+  module L = Labeled (struct type t = histo [@@ppp PPP_OCaml] end)
 
-  let make name help bucket_of_value =
+  let make ?save_dir name help bucket_of_value =
     let export m =
       let a = Array.make (Hashtbl.length m.counts) (0., 0., 0) in
       Hashtbl.fold (fun mi (ma, c) i ->
@@ -278,7 +323,7 @@ struct
       if Array.length a > 0 then
         Some (Histogram, MHistogram a)
       else None in
-    bucket_of_value, L.make export name help
+    bucket_of_value, L.make ?save_dir export name help
 
   let add (bucket_of_value, t) =
     let observe m v =
