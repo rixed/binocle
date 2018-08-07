@@ -70,6 +70,24 @@ struct
     match !xr with
     | Some x -> print_val to_string name labels now oc x
     | None -> ()
+
+  let with_open_fd fname ro f =
+    let open Legacy.Unix in
+    let flags = if ro then [O_RDONLY] else [O_WRONLY;O_CREAT;O_TRUNC] in
+    let fd = openfile fname flags 0o644 in
+    finally (fun () -> close fd)
+      f fd
+
+  let with_locked_fd fname ro f =
+    let open Legacy.Unix in
+    with_open_fd fname ro (fun fd ->
+      let op = if ro then F_RLOCK else F_LOCK in
+      lockf fd op 1 ;
+      finally
+        (fun () ->
+          ignore_exceptions (lseek fd 0) SEEK_SET ;
+          lockf fd F_ULOCK 1)
+        f fd)
   (*$>*)
 end
 
@@ -85,25 +103,27 @@ struct
       mutable per_labels : per_labels }
 
   let of_file fname =
-    let openflags = [ Open_rdonly; Open_text ] in
-    let ic = Legacy.open_in_gen openflags 0o644 fname in
-    finally
-      (fun () -> Legacy.close_in ic)
-      (PPP.of_in_channel_exc per_labels_ppp_ocaml) ic
+    Priv_.with_locked_fd fname true (fun fd ->
+      let ic = Legacy.Unix.in_channel_of_descr fd in
+      PPP.of_in_channel_exc per_labels_ppp_ocaml ic)
 
   let to_file fname v =
-    let openflags = [ Open_wronly; Open_creat; Open_trunc; Open_text ] in
-    let oc = Pervasives.open_out_gen openflags 0o644 fname in
-    finally
-      (fun () -> Pervasives.close_out oc)
-      (PPP.to_out_channel per_labels_ppp_ocaml oc) v
+    Priv_.with_locked_fd fname false (fun fd ->
+      let oc = Legacy.Unix.out_channel_of_descr fd in
+      ignore_exceptions (fun () ->
+        PPP.to_out_channel per_labels_ppp_ocaml oc v ;
+        Legacy.flush oc) ())
 
   let labeled_observation make_measure observe t ?(labels=[]) v =
     let labels = List.fast_sort Pervasives.compare labels in
     (* Maybe another program changed the saved value. If so, reload it
      * before proceeding: *)
     Option.may (fun fname ->
-      t.per_labels <- of_file fname
+      (* TODO: only if the file changed: *)
+      try t.per_labels <- of_file fname
+      with e ->
+        Printf.eprintf "Could not read %s: %s\n"
+          fname (Printexc.to_string e)
     ) t.save_file ;
     (match Hashtbl.find t.per_labels labels with
     | exception Not_found ->
@@ -140,7 +160,7 @@ struct
       | Some fname ->
           let t =
             try { name ; help ; per_labels = of_file fname ; save_file }
-            with Sys_error _ ->
+            with _ ->
               let t = make_new () in
               to_file fname t.per_labels ; (* Better crash now than at_exit *)
               t in
