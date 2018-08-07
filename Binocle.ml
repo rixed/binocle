@@ -22,7 +22,7 @@ type metric =
     labels : label list ;
     measure : measure }
 
-let all_measures : (string, (unit -> metric list)) Hashtbl.t =
+let all_measures : (string, string * (unit -> metric list)) Hashtbl.t =
   Hashtbl.create 71
 
 module Priv_ =
@@ -147,7 +147,8 @@ struct
           at_exit (fun () -> to_file fname t.per_labels) ;
           t
     in
-    Hashtbl.add all_measures name (fun () -> export_all export_measure t) ;
+    Hashtbl.add all_measures name
+      (help, (fun () -> export_all export_measure t)) ;
     t
 
   (* Kind-of following Prometheus style *)
@@ -406,3 +407,65 @@ end
     "# HELP test_gauge Demo of a labelled gauge\n\
      test_gauge{context=\"test\"} 42 1500136019000001\n\n" s
  *)
+
+(*
+ * Utility functions to print (on console) all known metrics:
+ *)
+
+let window_width =
+  try Sys.getenv "COLUMNS" |> int_of_string
+  with _ ->
+    (try
+      let _, s = Unix.run_and_read "stty size 2>/dev/null" in
+      Scanf.sscanf s "%d %d" (fun _h w -> w)
+    with _ -> 80)
+
+let colored ansi =
+  Printf.sprintf "\027[%sm%s\027[0m" ansi
+
+let grey = colored "1;30"
+let red = colored "1;31"
+let green = colored "1;32"
+let yellow = colored "1;33"
+let blue = colored "1;34"
+let magenta = colored "1;35"
+let cyan = colored "1;36"
+let white = colored "1;37"
+
+let make_bar n max_n max_width =
+  let l = (n * max_width) / max_n in
+  String.make l '='
+
+let print_metric oc metric =
+  List.print ~first:"  " ~last:" ->" ~sep:", " (fun oc (n, v) ->
+    Printf.fprintf oc "%s: %s" (green n) (yellow v)) oc metric.labels ;
+  match metric.measure with
+  | MFloat v -> Printf.fprintf oc " %s" (blue (string_of_float v))
+  | MInt v -> Printf.fprintf oc " %s" (blue (string_of_int v))
+  | MString v -> Printf.fprintf oc " %s" (blue v)
+  | MHistogram v ->
+      let bucket_cmp (v1, _, _) (v2, _, _) = Float.compare v1 v2 in
+      Array.fast_sort bucket_cmp v ;
+      let v = Array.map (fun (mi, ma, n) ->
+                Printf.sprintf "%f..%f" mi ma,
+                Printf.sprintf "%d" n,
+                n) v in
+      let max_intv, max_count, max_n =
+        Array.fold_left (fun (ma1, ma2, ma_n) (s1, s2, n) ->
+          assert (n >= 0) ;
+          max ma1 (String.length s1),
+          max ma2 (String.length s2),
+          max ma_n n) (0, 0, 0) v in
+      let max_bar_len = window_width - max_intv - max_count - 8 in
+      Array.print ~first:"\n" ~last:"" ~sep:"\n" (fun oc (intv, count, n) ->
+        let bar = make_bar n max_n max_bar_len in
+        Printf.fprintf oc "    %*s: %s %s" max_intv intv bar (blue count)) oc v
+
+let display_console () =
+  Hashtbl.iter (fun name (help, export) ->
+    Printf.printf "%s (%s)\n" (white help) (grey name) ;
+    let metrics = export () in
+    if metrics = [] then Printf.printf "  no information\n\n" else
+      List.print ~first:"" ~last:"\n\n" ~sep:"\n" print_metric
+        stdout metrics
+  ) all_measures
