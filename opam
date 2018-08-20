@@ -1,5 +1,5 @@
 opam-version: "1.2"
-version: "0.4"
+version: "0.5"
 name: "binocle"
 maintainer: "rixed-github@happyleptic.org"
 homepage: "http://github.com/rixed/binocle/"
