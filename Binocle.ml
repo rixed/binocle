@@ -488,4 +488,5 @@ let display_console () =
     if metrics = [] then Printf.printf "  no information\n\n" else
       List.print ~first:"" ~last:"\n\n" ~sep:"\n" print_metric
         stdout metrics
-  ) all_measures
+  ) all_measures ;
+  Printf.printf "%!"
