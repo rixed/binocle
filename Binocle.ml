@@ -122,7 +122,7 @@ struct
       (* TODO: only if the file changed: *)
       try t.per_labels <- of_file fname
       with e ->
-        Printf.eprintf "Could not read %s: %s\n"
+        Printf.eprintf "Could not read %s: %s, ignoring\n"
           fname (Printexc.to_string e)
     ) t.save_file ;
     (match Hashtbl.find t.per_labels labels with
