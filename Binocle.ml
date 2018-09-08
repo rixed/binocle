@@ -1,5 +1,18 @@
 open Batteries
 
+(* For convenience, we'd rather use top level variables for metrics, which will
+ * be implicitly initialized during modules initialization. The problem is that
+ * at this time we don't know yet if failing to read/save metric saved values
+ * should be ignored (my_program --version) or crash (my_program --run-service)
+ * therefore Binocle will just work on a "best-effort" basis and merely set
+ * this variable whenever it failed to read/write a file, so that the program
+ * can decide at startup (and later) whether to start (or continue) the service
+ * or not.
+ *
+ * In the future we could have two classes of metrics, with one that always
+ * ignore errors for convenience only metrics. *)
+let last_error = ref None
+
 type measure =
   | MFloat of float
   | MInt of int
@@ -108,11 +121,13 @@ struct
       PPP.of_in_channel_exc per_labels_ppp_ocaml ic)
 
   let to_file fname v =
-    Priv_.with_locked_fd fname false (fun fd ->
-      let oc = Legacy.Unix.out_channel_of_descr fd in
-      ignore_exceptions (fun () ->
-        PPP.to_out_channel per_labels_ppp_ocaml oc v ;
-        Legacy.flush oc) ())
+    try
+      Priv_.with_locked_fd fname false (fun fd ->
+        let oc = Legacy.Unix.out_channel_of_descr fd in
+        ignore_exceptions (fun () ->
+          PPP.to_out_channel per_labels_ppp_ocaml oc v ;
+          Legacy.flush oc) ())
+    with e -> last_error := Some e
 
   let labeled_observation make_measure observe t ?(labels=[]) v =
     let labels = List.fast_sort Pervasives.compare labels in
@@ -122,6 +137,7 @@ struct
       (* TODO: only if the file changed: *)
       try t.per_labels <- of_file fname
       with e ->
+        last_error := Some e ;
         Printf.eprintf "Could not read %s: %s, ignoring\n"
           fname (Printexc.to_string e)
     ) t.save_file ;
@@ -160,9 +176,11 @@ struct
       | Some fname ->
           let t =
             try { name ; help ; per_labels = of_file fname ; save_file }
-            with _ ->
+            with e ->
+              last_error := Some e ;
               let t = make_new () in
-              to_file fname t.per_labels ; (* Better crash now than at_exit *)
+              (* Make sure saving works as early as possible: *)
+              to_file fname t.per_labels ;
               t in
           at_exit (fun () -> to_file fname t.per_labels) ;
           t
