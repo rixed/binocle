@@ -225,7 +225,8 @@ struct
     and make () = ref 0 in
     L.labeled_observation make observe t
 
-  let inc t = add t 1
+  let inc ?labels t = add ?labels t 1
+  let dec ?labels t = add ?labels t ~-1
 
   (* Directly set the value of the measure *)
   let set t =
