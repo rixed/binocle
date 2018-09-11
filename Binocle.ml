@@ -19,7 +19,7 @@ type measure =
   | MString of string
   | MHistogram of (float * float * int) array
 
-type kind = Counter | Gauge | Histogram
+type kind = Counter | Gauge | Min | Max | Histogram
 
 type label = string * string
   [@@ppp PPP_OCaml]
@@ -79,10 +79,19 @@ struct
       ) labels ;
     Printf.fprintf oc "} %s %s\n" (to_string x) now
 
-  let print_val_option to_string name labels now oc xr =
+  (* Gauges are made of three values (min, value, max): *)
+  let print_gauge to_string name labels now oc (mi, x, ma) =
+    print_val to_string name labels now oc x ;
+    print_val to_string (name ^"_min") labels now oc mi ;
+    print_val to_string (name ^"_max") labels now oc ma
+
+  let print_option printer to_string name labels now oc xr =
     match !xr with
-    | Some x -> print_val to_string name labels now oc x
+    | Some x -> printer to_string name labels now oc x
     | None -> ()
+
+  let print_val_option to_string = print_option print_val to_string
+  let print_gauge_option to_string = print_option print_gauge to_string
 
   let with_open_fd fname ro f =
     let open Legacy.Unix in
@@ -157,11 +166,11 @@ struct
 
   let export_all export_measure t =
     Hashtbl.fold (fun labels m lst ->
-        match export_measure m with
-        | None -> lst
-        | Some (kind, measure) ->
-          { name = t.name ; labels ; kind ; measure } :: lst
-      ) t.per_labels []
+      export_measure m |>
+      List.fold_left (fun lst (kind, measure) ->
+        { name = t.name ; labels ; kind ; measure } :: lst
+      ) lst
+    ) t.per_labels []
 
   (* If [save_dir] is set then current value of the counter will be saved
    * in this file at exit, and loaded from it at creation: *)
@@ -207,7 +216,7 @@ struct
 
   (* Build an int counter *)
   let make =
-    let export m = Some (Counter, MInt !m) in
+    let export m = [ Counter, MInt !m ] in
     L.make export
 
   (* Add an observation to this measure *)
@@ -242,7 +251,7 @@ struct
   module L = Labeled (struct type t = float ref [@@ppp PPP_OCaml] end)
 
   let make =
-    let export m = Some (Counter, MFloat !m) in
+    let export m = [ Counter, MFloat !m ] in
     L.make export
 
   let add t =
@@ -266,14 +275,25 @@ end
 
 module IntGauge =
 struct
-  module L = Labeled (struct type t = int option ref [@@ppp PPP_OCaml] end)
+  module L =
+    Labeled (struct
+      type t = (int * int * int) option ref [@@ppp PPP_OCaml]
+    end)
 
   let make =
-    let export m = Option.map (fun m -> Gauge, MInt m) !m in
+    let export m =
+      match !m with
+      | None -> []
+      | Some (mi, x, ma) ->
+          [ Gauge, MInt x ; Min, MInt mi ; Max, MInt ma ] in
     L.make export
 
   let set t =
-    let observe m v = m := Some v
+    let observe m v =
+      m :=
+        match !m with
+        | None -> Some (v, v, v)
+        | Some (mi, v, ma) -> Some (Int.min mi v, v, Int.max ma v)
     and make () = ref None in
     L.labeled_observation make observe t
 
@@ -281,19 +301,30 @@ struct
     try !(L.get ?labels t) with Not_found -> None
 
   let print now oc t =
-    L.print (Priv_.print_val_option string_of_int) now oc t
+    L.print (Priv_.print_gauge_option string_of_int) now oc t
 end
 
 module FloatGauge =
 struct
-  module L = Labeled (struct type t = float option ref [@@ppp PPP_OCaml] end)
+  module L =
+    Labeled (struct
+      type t = (float * float * float) option ref [@@ppp PPP_OCaml]
+    end)
 
   let make =
-    let export m = Option.map (fun m -> Gauge, MFloat m) !m in
+    let export m =
+      match !m with
+      | None -> []
+      | Some (mi, x, ma) ->
+          [ Gauge, MFloat x ; Min, MFloat mi ; Max, MFloat ma ] in
     L.make export
 
   let set t =
-    let observe m v = m := Some v
+    let observe m v =
+      m :=
+        match !m with
+        | None -> Some (v, v, v)
+        | Some (mi, v, ma) -> Some (Float.min mi v, v, Float.max ma v)
     and make () = ref None in
     L.labeled_observation make observe t
 
@@ -301,15 +332,19 @@ struct
     try !(L.get ?labels t) with Not_found -> None
 
   let print now oc t =
-    L.print (Priv_.print_val_option string_of_float) now oc t
+    L.print (Priv_.print_gauge_option string_of_float) now oc t
 end
 
 module StringValue =
 struct
+  (* No min/max for strings *)
   module L = Labeled (struct type t = string option ref [@@ppp PPP_OCaml] end)
 
   let make =
-    let export m = Option.map (fun m -> Gauge, MString m) !m in
+    let export m =
+      match !m with
+      | None -> []
+      | Some s -> [ Gauge, MString s ] in
     L.make export
 
   let set t =
@@ -329,7 +364,7 @@ struct
   module L = Labeled (struct type t = string [@@ppp PPP_OCaml] end)
 
   let make s name help =
-    let export m = Some (Gauge, MString m) in
+    let export m = [ Gauge, MString m ] in
     s, L.make export name help
 
   let get ?labels t = L.get ?labels t
@@ -363,8 +398,8 @@ struct
           compare mi1 mi2
         ) a ;
       if Array.length a > 0 then
-        Some (Histogram, MHistogram a)
-      else None in
+        [ Histogram, MHistogram a ]
+      else [] in
     bucket_of_value, L.make ?save_dir export name help
 
   let add (bucket_of_value, t) =
@@ -443,7 +478,9 @@ end
   let s = BatIO.to_string (IntGauge.print 1500136019.000001) ram_usage in
   assert_equal ~printer:BatPervasives.identity
     "# HELP test_gauge Demo of a labelled gauge\n\
-     test_gauge{context=\"test\"} 42 1500136019000001\n\n" s
+     test_gauge{context=\"test\"} 42 1500136019000001\n\
+     test_gauge_min{context=\"test\"} 42 1500136019000001\n\
+     test_gauge_max{context=\"test\"} 42 1500136019000001\n\n" s
  *)
 
 (*
