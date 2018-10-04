@@ -18,10 +18,12 @@ let last_error = ref None
 type measure =
   | MFloat of float
   | MInt of int
+  | MFloatRange of (float * float * float) (* min, value, max *)
+  | MIntRange of (int * int * int) (* min, value, max *)
   | MString of string
   | MHistogram of (float * float * int) array
 
-type kind = Counter | Gauge | Min | Max | Histogram
+type kind = Counter | Gauge | Histogram
 
 type label = string * string
   [@@ppp PPP_OCaml]
@@ -287,8 +289,7 @@ struct
     let export m =
       match !m with
       | None -> []
-      | Some (mi, x, ma) ->
-          [ Gauge, MInt x ; Min, MInt mi ; Max, MInt ma ] in
+      | Some range -> [ Gauge, MIntRange range ] in
     L.make export
 
   let set t =
@@ -318,8 +319,7 @@ struct
     let export m =
       match !m with
       | None -> []
-      | Some (mi, x, ma) ->
-          [ Gauge, MFloat x ; Min, MFloat mi ; Max, MFloat ma ] in
+      | Some range -> [ Gauge, MFloatRange range ] in
     L.make export
 
   let set t =
@@ -514,13 +514,23 @@ let make_bar n max_n max_width =
   let l = (n * max_width) / max_n in
   String.make l '='
 
-let print_metric oc metric =
-  List.print ~first:"  " ~last:" ->" ~sep:", " (fun oc (n, v) ->
-    Printf.fprintf oc "%s: %s" (green n) (yellow v)) oc metric.labels ;
-  match metric.measure with
-  | MFloat v -> Printf.fprintf oc " %s" (blue (string_of_float v))
-  | MInt v -> Printf.fprintf oc " %s" (blue (string_of_int v))
-  | MString v -> Printf.fprintf oc " %s" (blue v)
+let display_measure oc = function
+  | MFloat v ->
+      Printf.fprintf oc " %s" (blue (string_of_float v))
+  | MInt v ->
+      Printf.fprintf oc " %s" (blue (string_of_int v))
+  | MFloatRange (mi, v, ma) ->
+      Printf.fprintf oc " %s.. %s ..%s"
+        (grey (string_of_float mi))
+        (blue (string_of_float v))
+        (grey (string_of_float ma))
+  | MIntRange (mi, v, ma) ->
+      Printf.fprintf oc " %s.. %s ..%s"
+        (grey (string_of_int mi))
+        (blue (string_of_int v))
+        (grey (string_of_int ma))
+  | MString v ->
+      Printf.fprintf oc " %s" (blue v)
   | MHistogram v ->
       let bucket_cmp (v1, _, _) (v2, _, _) = Float.compare v1 v2 in
       Array.fast_sort bucket_cmp v ;
@@ -539,12 +549,18 @@ let print_metric oc metric =
         let bar = make_bar n max_n max_bar_len in
         Printf.fprintf oc "    %*s: %s %s" max_intv intv bar (blue count)) oc v
 
+let display_metric oc metric =
+  List.print ~first:"  " ~last:" ->" ~sep:", " (fun oc (n, v) ->
+    Printf.fprintf oc "%s: %s" (green n) (yellow v)) oc metric.labels ;
+  display_measure oc metric.measure
+
 let display_console () =
   Hashtbl.iter (fun name (help, export) ->
     Printf.printf "%s (%s)\n" (white help) (grey name) ;
-    let metrics = export () in
-    if metrics = [] then Printf.printf "  no information\n\n" else
-      List.print ~first:"" ~last:"\n\n" ~sep:"\n" print_metric
-        stdout metrics
+    match export () with
+    | [] -> Printf.printf "  no information\n\n"
+    | metrics ->
+        List.print ~first:"" ~last:"\n\n" ~sep:"\n" display_metric
+          stdout metrics
   ) all_measures ;
   Printf.printf "%!"
