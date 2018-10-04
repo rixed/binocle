@@ -1,5 +1,7 @@
 open Batteries
 
+let version = "v0.7"
+
 (* For convenience, we'd rather use top level variables for metrics, which will
  * be implicitly initialized during modules initialization. The problem is that
  * at this time we don't know yet if failing to read/save metric saved values
