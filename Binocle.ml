@@ -297,7 +297,7 @@ struct
       m :=
         match !m with
         | None -> Some (v, v, v)
-        | Some (mi, v, ma) -> Some (Int.min mi v, v, Int.max ma v)
+        | Some (mi, _, ma) -> Some (Int.min mi v, v, Int.max ma v)
     and make () = ref None in
     L.labeled_observation make observe t
 
@@ -327,7 +327,7 @@ struct
       m :=
         match !m with
         | None -> Some (v, v, v)
-        | Some (mi, v, ma) -> Some (Float.min mi v, v, Float.max ma v)
+        | Some (mi, _, ma) -> Some (Float.min mi v, v, Float.max ma v)
     and make () = ref None in
     L.labeled_observation make observe t
 
