@@ -32,8 +32,6 @@ Binocle.cma: $(BINOCLE_SOURCES:.ml=.cmo)
 Binocle.a: Binocle.cmxa
 
 clean-spec:
-
-distclean-spec:
 	$(RM) Binocle.cmxa Binocle.cma Binocle.cmx
 
 check-spec:
