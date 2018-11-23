@@ -151,8 +151,10 @@ struct
       try t.per_labels <- of_file fname
       with e ->
         last_error := Some e ;
-        Printf.eprintf "Could not read %s: %s, ignoring\n"
-          fname (Printexc.to_string e)
+        Printf.eprintf "Could not read %s: %s\n%s.\nIgnoring...\n"
+          fname
+          (Printexc.to_string e)
+          (Printexc.get_backtrace ())
     ) t.save_file ;
     (match Hashtbl.find t.per_labels labels with
     | exception Not_found ->
