@@ -108,11 +108,11 @@ struct
     let open Legacy.Unix in
     with_open_fd fname ro (fun fd ->
       let op = if ro then F_RLOCK else F_LOCK in
-      lockf fd op 1 ;
+      lockf fd op 0 ;
       finally
         (fun () ->
           ignore_exceptions (lseek fd 0) SEEK_SET ;
-          lockf fd F_ULOCK 1)
+          lockf fd F_ULOCK 0)
         f fd)
   (*$>*)
 end
