@@ -380,6 +380,82 @@ end
 
 module Timestamp = FloatGauge
 
+module Perf =
+struct
+  type t =
+    { mutable count : int ; mutable user : float ; mutable system : float }
+    [@@ppp PPP_OCaml]
+
+  type perf_started = Unix.process_times option
+  type perf_stopped = t option
+
+  (* First some helpers to measure (statistically) CPU consumption as a
+   * type [perf]: *)
+
+  (* Might start to time, or do nothing: *)
+  let start () =
+    if Random.float 1. <= 0.01 then Some (Unix.times ())
+    else None
+
+  let stop_ start =
+    let stop = Unix.times () in
+    { user = Unix.(stop.tms_utime -. start.tms_utime) ;
+      system = Unix.(stop.tms_stime -. start.tms_stime) ;
+      count = 1 },
+    stop
+
+  let stop started =
+    Option.map (fun start ->
+      stop_ start |> fst
+    ) started
+
+  let transfer started =
+    Option.map (fun start ->
+      stop_ start
+    ) started
+
+  (* Which then can be added to some counter: *)
+
+  module L = Labeled (struct
+    type obs = t
+    let obs_ppp_ocaml = t_ppp_ocaml
+    type t = obs [@@ppp PPP_OCaml]
+  end)
+
+  let make =
+    let export m =
+      [ Counter, MInt m.count ;
+        Counter, MFloat m.user ;
+        Counter, MFloat m.system ] in
+    L.make export
+
+  let add t ?labels stopped =
+    let observe m stopped =
+      (* Detect cases where [stop] has not been called: *)
+      assert (stopped.count > 0) ;
+      m.count <- m.count + stopped.count ;
+      m.user <- m.user +. stopped.user ;
+      m.system <- m.system +. stopped.system
+    and make () = { count = 0 ; user = 0. ; system = 0. } in
+    Option.may (L.labeled_observation make observe t ?labels) stopped
+
+  let add_and_transfer t ?labels started =
+    Option.bind (transfer started) (fun (stopped, started) ->
+      add t ?labels (Some stopped) ;
+      Some started)
+
+  let get ?labels t =
+    try Some (L.get ?labels t) with Not_found -> None
+
+  let print now oc t =
+    let print_perf name labels now oc p =
+      Priv_.print_val string_of_int (name ^".count") labels now oc p.count ;
+      Priv_.print_val string_of_float (name ^".user") labels now oc p.user ;
+      Priv_.print_val string_of_float (name ^".system") labels now oc p.system
+    in
+    L.print print_perf now oc t
+end
+
 (* Return a single measure composed of several buckets *)
 module Histogram =
 struct
