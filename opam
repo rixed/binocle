@@ -3,8 +3,10 @@ version: "0.8.1"
 name: "binocle"
 maintainer: "rixed-github@happyleptic.org"
 homepage: "http://github.com/rixed/binocle/"
+authors: "rixed-github@happyleptic.org"
 bug-reports: "https://github.com/rixed/binocle/issues"
 dev-repo: "https://github.com/rixed/binocle.git"
+synopsis: "Simplest instrumentation lib for OCaml"
 
 build: [
   [make "all"]

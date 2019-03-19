@@ -184,7 +184,7 @@ struct
     let save_file = Option.map (fun d -> d ^"/"^ name) save_dir in
     assert (not (Hashtbl.mem all_measures name)) ;
     let make_new () =
-        { name ; help ; per_labels = Hashtbl.create 17 ; save_file } in
+      { name ; help ; per_labels = Hashtbl.create 17 ; save_file } in
     let t =
       match save_file with
       | None -> make_new ()
