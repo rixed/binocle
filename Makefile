@@ -13,7 +13,7 @@ BINOCLE_SOURCES = \
 SOURCES = \
 	$(BINOCLE_SOURCES)
 
-PACKAGES = batteries ppp
+PACKAGES = batteries ppp.ppx
 
 INSTALLED = \
 	META Binocle.cma $(BINOCLE_SOURCES:.ml=.cmi) \
