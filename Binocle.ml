@@ -47,8 +47,7 @@ struct
   (*$< Priv_*)
   let make_rate_limited delay =
     let last_done = ref 0. in
-    fun f ->
-      let now = Unix.gettimeofday () in
+    fun now f ->
       if now -. !last_done >= delay then (
         last_done := now ;
         f ())
@@ -123,15 +122,18 @@ struct
           lockf fd F_ULOCK 0)
         f fd)
 
-  let file_beginning ?(max=20) fname =
+  let beginning_of_file ?(max=20) fname =
     let res = Bytes.create max in
     with_open_fd fname true (fun fd ->
       let rec loop o =
         if o >= max then res else
-        let r = Unix.read fd res o (max - o) in
+        let r = Unix.(restart_on_EINTR read fd res o) (max - o) in
         if r = 0 then Bytes.sub res 0 o else
         loop (o + r) in
       loop 0 |> Bytes.to_string)
+
+  let mtime_of_file fname =
+    Unix.((restart_on_EINTR stat fname).st_mtime)
   (*$>*)
 end
 
@@ -144,7 +146,8 @@ struct
     { name : string ;
       help : string ;
       save_file : string option ;
-      mutable per_labels : per_labels }
+      mutable per_labels : per_labels ;
+      mutable last_read_file : float }
 
   let of_file fname =
     Priv_.with_locked_fd fname true (fun fd ->
@@ -167,16 +170,19 @@ struct
     (* Maybe another program changed the saved value. If so, reload it
      * before proceeding: *)
     Option.may (fun fname ->
-      (* TODO: only if the file changed: *)
-      try t.per_labels <- of_file fname
-      with e ->
-        last_error := Some e ;
-        rate_limited_log (fun () ->
-          Printf.eprintf "Could not read %s (%S): %s\n%s.\nIgnoring...\n"
-            fname
-            (Priv_.file_beginning fname)
-            (Printexc.to_string e)
-            (Printexc.get_backtrace ()))
+      let last_changed = Priv_.mtime_of_file fname
+      and now = Unix.gettimeofday () in
+      if last_changed >= t.last_read_file then (
+        t.last_read_file <- now ;
+        try t.per_labels <- of_file fname
+        with e ->
+          last_error := Some e ;
+          rate_limited_log now (fun () ->
+            Printf.eprintf "Could not read %s (%S): %s\n%s.\nIgnoring...\n"
+              fname
+              (Priv_.beginning_of_file fname)
+              (Printexc.to_string e)
+              (Printexc.get_backtrace ())))
     ) t.save_file ;
     (match Hashtbl.find t.per_labels labels with
     | exception Not_found ->
@@ -206,13 +212,15 @@ struct
     let save_file = Option.map (fun d -> d ^"/"^ name) save_dir in
     assert (not (Hashtbl.mem all_measures name)) ;
     let make_new () =
-      { name ; help ; per_labels = Hashtbl.create 17 ; save_file } in
+      { name ; help ; per_labels = Hashtbl.create 17 ; save_file ;
+        last_read_file = 0. } in
     let t =
       match save_file with
       | None -> make_new ()
       | Some fname ->
           let t =
-            try { name ; help ; per_labels = of_file fname ; save_file }
+            try { name ; help ; per_labels = of_file fname ; save_file ;
+                  last_read_file = 0. }
             with e ->
               last_error := Some e ;
               let t = make_new () in
