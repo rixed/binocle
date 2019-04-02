@@ -74,7 +74,8 @@ struct
 
   let now_us now =
     let now_s = int_of_float now in
-    let now_us = (now -. float_of_int now_s) *. 1_000_000.0 |> round_to_int in
+    let now_us =
+      (now -. float_of_int now_s) *. 1_000_000.0 |> round_to_int in
     Printf.sprintf "%d%06d" now_s now_us
 
   (*$= now_us & ~printer:BatPervasives.identity
@@ -86,7 +87,8 @@ struct
   let print_val to_string name labels now oc x =
     Printf.fprintf oc "%s{" name ;
     List.iteri (fun i label ->
-        Printf.fprintf oc "%s%a" (if i > 0 then "," else "") print_label label
+        Printf.fprintf oc "%s%a"
+          (if i > 0 then "," else "") print_label label
       ) labels ;
     Printf.fprintf oc "} %s %s\n" (to_string x) now
 
@@ -313,7 +315,7 @@ struct
     L.print (Priv_.print_val (fun m -> string_of_float !m)) now oc t
 end
 
-(* TODO: A special kind of gauge that keep only the min/max? *)
+(* TODO: A special kind of gauge that keeps only the min/max? *)
 
 module IntGauge =
 struct
