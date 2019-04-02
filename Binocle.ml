@@ -106,7 +106,7 @@ struct
 
   let with_open_fd fname ro f =
     let open Legacy.Unix in
-    let flags = if ro then [O_RDONLY] else [O_WRONLY;O_CREAT;O_TRUNC] in
+    let flags = if ro then [O_RDONLY] else [O_RDWR;O_CREAT;O_CLOEXEC] in
     let fd = openfile fname flags 0o644 in
     finally (fun () -> close fd)
       f fd
@@ -157,6 +157,7 @@ struct
   let to_file fname v =
     try
       Priv_.with_locked_fd fname false (fun fd ->
+        Unix.(restart_on_EINTR (ftruncate fd)) 0 ;
         let oc = Legacy.Unix.out_channel_of_descr fd in
         ignore_exceptions (fun () ->
           PPP.to_out_channel per_labels_ppp_ocaml oc v ;
