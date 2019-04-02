@@ -132,8 +132,8 @@ struct
         loop (o + r) in
       loop 0 |> Bytes.to_string)
 
-  let mtime_of_file fname =
-    Unix.((restart_on_EINTR stat fname).st_mtime)
+  let mtime_of_fd fname =
+    Unix.((restart_on_EINTR fstat fname).st_mtime)
   (*$>*)
 end
 
@@ -149,10 +149,9 @@ struct
       mutable per_labels : per_labels ;
       mutable last_read_file : float }
 
-  let of_file fname =
-    Priv_.with_locked_fd fname true (fun fd ->
-      let ic = Legacy.Unix.in_channel_of_descr fd in
-      PPP.of_in_channel_exc per_labels_ppp_ocaml ic)
+  let of_file fd =
+    let ic = Legacy.Unix.in_channel_of_descr fd in
+    PPP.of_in_channel_exc per_labels_ppp_ocaml ic
 
   let to_file fname v =
     try
@@ -168,33 +167,36 @@ struct
 
   let labeled_observation make_measure observe t ?(labels=[]) v =
     let labels = List.fast_sort Pervasives.compare labels in
-    (* Maybe another program changed the saved value. If so, reload it
-     * before proceeding: *)
-    Option.may (fun fname ->
-      let last_changed = Priv_.mtime_of_file fname
-      and now = Unix.gettimeofday () in
-      if last_changed >= t.last_read_file then (
-        t.last_read_file <- now ;
-        try t.per_labels <- of_file fname
-        with e ->
-          last_error := Some e ;
-          rate_limited_log now (fun () ->
-            Printf.eprintf "Could not read %s (%S): %s\n%s.\nIgnoring...\n"
-              fname
-              (Priv_.beginning_of_file fname)
-              (Printexc.to_string e)
-              (Printexc.get_backtrace ())))
-    ) t.save_file ;
-    (match Hashtbl.find t.per_labels labels with
-    | exception Not_found ->
-      let m = make_measure () in
-      observe m v ;
-      Hashtbl.add t.per_labels labels m
-    | prev ->
-      observe prev v) ;
-    Option.may (fun fname ->
-      to_file fname t.per_labels
-    ) t.save_file
+    let update () =
+      match Hashtbl.find t.per_labels labels with
+      | exception Not_found ->
+        let m = make_measure () in
+        observe m v ;
+        Hashtbl.add t.per_labels labels m
+      | prev ->
+        observe prev v in
+    match t.save_file with
+    | None ->
+        update ()
+    | Some fname ->
+        (* Maybe another program changed the saved value. If so, reload it
+         * before proceeding: *)
+        Priv_.with_locked_fd fname false (fun fd ->
+          let last_changed = Priv_.mtime_of_fd fd
+          and now = Unix.gettimeofday () in
+          if last_changed >= t.last_read_file then (
+            t.last_read_file <- now ;
+            try t.per_labels <- of_file fd
+            with e ->
+              last_error := Some e ;
+              rate_limited_log now (fun () ->
+                Printf.eprintf "Could not read %s (%S): %s\n%s.\nIgnoring...\n%!"
+                  fname
+                  (Priv_.beginning_of_file fname)
+                  (Printexc.to_string e)
+                  (Printexc.get_backtrace ()))) ;
+          update () ;
+          to_file fname t.per_labels)
 
   let get ?(labels=[]) t =
     Hashtbl.find t.per_labels labels
@@ -220,8 +222,10 @@ struct
       | None -> make_new ()
       | Some fname ->
           let t =
-            try { name ; help ; per_labels = of_file fname ; save_file ;
-                  last_read_file = 0. }
+            try
+              Priv_.with_locked_fd fname true (fun fd ->
+                { name ; help ; per_labels = of_file fd ; save_file ;
+                  last_read_file = 0. })
             with e ->
               last_error := Some e ;
               let t = make_new () in
