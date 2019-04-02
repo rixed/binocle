@@ -45,6 +45,14 @@ let all_measures : (string, string * (unit -> metric list)) Hashtbl.t =
 module Priv_ =
 struct
   (*$< Priv_*)
+  let make_rate_limited delay =
+    let last_done = ref 0. in
+    fun f ->
+      let now = Unix.gettimeofday () in
+      if now -. !last_done >= delay then (
+        last_done := now ;
+        f ())
+
   let round_to_int f =
     let frac, _ = modf f
     and n = int_of_float f in
@@ -114,6 +122,16 @@ struct
           ignore_exceptions (lseek fd 0) SEEK_SET ;
           lockf fd F_ULOCK 0)
         f fd)
+
+  let file_beginning ?(max=20) fname =
+    let res = Bytes.create max in
+    with_open_fd fname true (fun fd ->
+      let rec loop o =
+        if o >= max then res else
+        let r = Unix.read fd res o (max - o) in
+        if r = 0 then Bytes.sub res 0 o else
+        loop (o + r) in
+      loop 0 |> Bytes.to_string)
   (*$>*)
 end
 
@@ -142,6 +160,8 @@ struct
           Legacy.flush oc) ())
     with e -> last_error := Some e
 
+  let rate_limited_log = Priv_.make_rate_limited 5.
+
   let labeled_observation make_measure observe t ?(labels=[]) v =
     let labels = List.fast_sort Pervasives.compare labels in
     (* Maybe another program changed the saved value. If so, reload it
@@ -151,10 +171,12 @@ struct
       try t.per_labels <- of_file fname
       with e ->
         last_error := Some e ;
-        Printf.eprintf "Could not read %s: %s\n%s.\nIgnoring...\n"
-          fname
-          (Printexc.to_string e)
-          (Printexc.get_backtrace ())
+        rate_limited_log (fun () ->
+          Printf.eprintf "Could not read %s (%S): %s\n%s.\nIgnoring...\n"
+            fname
+            (Priv_.file_beginning fname)
+            (Printexc.to_string e)
+            (Printexc.get_backtrace ()))
     ) t.save_file ;
     (match Hashtbl.find t.per_labels labels with
     | exception Not_found ->
