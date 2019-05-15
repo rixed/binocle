@@ -303,6 +303,9 @@ struct
     and make () = ref 0. in
     L.labeled_observation make observe t
 
+  let inc ?labels t = add ?labels t 1.
+  let dec ?labels t = add ?labels t ~-.1.
+
   let set t =
     let observe m v = m := v
     and make () = ref 0. in
@@ -343,6 +346,18 @@ struct
   let get ?labels t =
     try !(L.get ?labels t) with Not_found -> None
 
+  let add t =
+    let observe m v =
+      (* Assume starting at 0 when using add/sub *)
+      let mi, p, ma = !m |? (0, 0, 0) in
+      let p = p + v in
+      m := Some (Int.min mi p, p, Int.max ma p)
+    and make () = ref None in
+    L.labeled_observation make observe t
+
+  let inc ?labels t = add ?labels t 1
+  let dec ?labels t = add ?labels t ~-1
+
   let print now oc t =
     L.print (Priv_.print_gauge_option string_of_int) now oc t
 end
@@ -372,6 +387,18 @@ struct
 
   let get ?labels t =
     try !(L.get ?labels t) with Not_found -> None
+
+  let add t =
+    let observe m v =
+      (* Assume starting at 0 when using add/sub *)
+      let mi, p, ma = !m |? (0., 0., 0.) in
+      let p = p +. v in
+      m := Some (Float.min mi p, p, Float.max ma p)
+    and make () = ref None in
+    L.labeled_observation make observe t
+
+  let inc ?labels t = add ?labels t 1.
+  let dec ?labels t = add ?labels t ~-.1.
 
   let print now oc t =
     L.print (Priv_.print_gauge_option string_of_float) now oc t
