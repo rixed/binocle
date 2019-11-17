@@ -3,13 +3,13 @@
 
 stdenv.mkDerivation rec {
   pname = "ocaml${ocaml.version}-binocle";
-  version = "0.9.0";
+  version = "0.11.0";
 
   src = fetchFromGitHub {
     owner = "rixed";
     repo = "binocle";
-    rev = "v${version}";
-    sha256 = "1qfdw2z48f3xy8gd5pn29dliai1k3ac821q05l83cglydhrfhfsl";
+    rev = "v0.11.0";
+    sha256 = "1pjckmzskwg8r79k1xvbi9nqcly2nxicpxxpsaa8dnjyav0hwf6z";
   };
 
   buildInputs = [ ocaml findlib batteries pretty-printers-parsers stdint ];
