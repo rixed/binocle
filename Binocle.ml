@@ -37,7 +37,8 @@ type metric =
   { name : string ;
     kind : kind ;
     labels : label list ;
-    measure : measure }
+    measure : measure ;
+    help : string }
 
 let all_measures : (string, string * (unit -> metric list)) Hashtbl.t =
   Hashtbl.create 71
@@ -207,7 +208,7 @@ struct
     Hashtbl.fold (fun labels m lst ->
       export_measure m |>
       List.fold_left (fun lst (kind, measure) ->
-        { name = t.name ; labels ; kind ; measure } :: lst
+        { name = t.name ; labels ; kind ; measure; help = t.help } :: lst
       ) lst
     ) t.per_labels []
 
@@ -706,3 +707,61 @@ let display_console () =
           stdout metrics
   ) all_measures ;
   Printf.printf "%!"
+
+
+(* Kind-of following Prometheus style *)
+let print_ print_measure now oc t =
+  let now_us = Priv_.now_us now in
+  Printf.fprintf oc "# HELP %s %s\n" t.name t.help ;
+  print_measure t.name t.labels now_us oc ;
+  Printf.fprintf oc "\n"
+
+let print_val to_string name labels now oc x =
+  Printf.fprintf oc "%s{" name ;
+  List.iteri (fun i label ->
+      Printf.fprintf oc "%s%a"
+        (if i > 0 then "," else "") print_label label
+    ) labels ;
+  Printf.fprintf oc "} %s %s\n" (to_string) now
+
+let print now oc t =
+  match t.measure with
+  | MInt v ->
+      print_ (print_val (string_of_int v)) now oc t
+  | MFloat v ->
+      print_ (print_val (string_of_float v)) now oc t
+  | MFloatRange _ ->
+      print_ (Priv_.print_gauge_option string_of_float) now oc t
+  | MIntRange _ ->
+      print_ (Priv_.print_gauge_option string_of_int) now oc t
+  | MString _ ->
+      print_ (Priv_.print_val_option identity) now oc t
+  | MHistogram _ ->
+    let print_measure name labels now_us oc histo =
+      let count =
+        let name_bucket = name ^"_bucket" in
+        let buckets =
+          Hashtbl.fold (fun _k v lst -> v :: lst) histo.Histogram.counts [] |>
+          List.fast_sort (fun (ma1, _) (ma2, _) ->
+            compare (ma1:float) (ma2:float)) in
+        List.fold_left (fun count (ma, c) ->
+            let count = count + c in
+            let labels = ("le", string_of_float ma) :: labels in
+            Priv_.print_val string_of_int name_bucket labels now_us oc count ;
+            count
+          ) 0 buckets in
+      Priv_.print_val string_of_float (name ^"_sum") labels now_us oc histo.sum ;
+      Priv_.print_val string_of_int (name ^"_count") labels now_us oc count in
+      print_ print_measure now oc t
+      
+
+let print_prometheus_measure oc = 
+  Hashtbl.iter (fun name (help, export) ->
+    let now = Unix.time () /. 1000. in
+    match export () with
+    | [] -> Printf.fprintf oc "  no information\n\n"
+    | metrics ->
+        List.print ~first:"" ~last:"\n\n" ~sep:"\n" (print now)
+          oc metrics
+  ) all_measures ;
+  Printf.fprintf oc "%!"

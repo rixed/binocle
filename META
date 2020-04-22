@@ -1,5 +1,10 @@
 description = "Instrumentation for OCaml programs"
-version = "0.11.0"
+version = "0.11.2"
 archive(byte) = "Binocle.cma"
 archive(native) = "Binocle.cmxa"
 requires = "findlib batteries ppp unix"
+package "thread" (
+requires = "findlib batteries ppp net_codecs parsercombinator unix"
+archive(byte) = "BinocleThread.cma"
+archive(native) = "BinocleThread.cmxa"
+) 

@@ -17,11 +17,24 @@ override CPPFLAGS      += --std=c11 -D_GNU_SOURCE -I $(shell ocamlfind ocamlc -w
 %.cmi: %.ml
 	$(MAKE) $(addsuffix .cmo,$(basename $@))
 
-%.cmo: %.ml
+$(patsubst %.ml, %.cmo, $(BINOCLE_SOURCES)): %.cmo: %.ml
 	$(OCAMLC) $(OCAMLFLAGS) -package "$(PACKAGES)" -c $<
 
-%.cmx %.annot: %.ml
+$(patsubst %.ml, %.cmo, $(BINOCLE_THREAD_SOURCES)): %.cmo: %.ml
+	$(OCAMLC) -thread $(OCAMLFLAGS) -package "$(PACKAGES) $(THREAD_PACKAGES)" -c $<
+
+$(patsubst %.ml, %.cmx, $(BINOCLE_SOURCES)): %.cmx : %.ml
 	$(OCAMLOPT) $(OCAMLOPTFLAGS) -package "$(PACKAGES)" -c $<
+
+$(patsubst %.ml, %.cmx, $(BINOCLE_THREAD_SOURCES)): %.cmx : %.ml
+	$(OCAMLOPT) -thread $(OCAMLOPTFLAGS) -package "$(PACKAGES) $(THREAD_PACKAGES)" -c $<
+
+$(patsubst %.ml, %.annot, $(BINOCLE_SOURCES)): %.annot: %.ml
+	$(OCAMLOPT) $(OCAMLOPTFLAGS) -package "$(PACKAGES)" -c $<
+
+$(patsubst %.ml, %.annot, $(BINOCLE_THREAD_SOURCES)): %.annot: %.ml
+	$(OCAMLOPT) -thread $(OCAMLOPTFLAGS) -package "$(PACKAGES) $(THREAD_PACKAGES)" -c $<
+
 
 %.html: %.adoc
 	asciidoc -a data-uri -a icons -a toc -a max-width=55em --theme volnitsky -o $@ $<
