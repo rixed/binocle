@@ -1,6 +1,6 @@
 open Batteries
 
-let version = "v0.11.0"
+let version = "v0.12.0"
 
 (* For convenience, we'd rather use top level variables for metrics, which will
  * be implicitly initialized during modules initialization. The problem is that
@@ -21,7 +21,7 @@ type measure =
   | MFloatRange of (float * float * float) (* min, value, max *)
   | MIntRange of (int * int * int) (* min, value, max *)
   | MString of string
-  | MHistogram of (float * float * int) array
+  | MHistogram of (float * float * int) array * float
 
 type kind = Counter | Gauge | Histogram
 
@@ -36,15 +36,16 @@ let print_labels oc labels =
 (* As all the metrics defined by the `Labeled` functor do not have the same type
  * they are mapped to this `metric` type to process them all at once, in the
  * `display_console` function for example. *)
+(* TODO: Add the timestamp of the last change *)
 type metric =
-  { name : string ;
-    kind : kind ;
+  { kind : kind ;
     labels : label list ;
     measure : measure }
 
 (* Contains all the metrics indexed by name.
  * Values are a pair with their help string and export function. *)
-let all_measures : (string, string * (unit -> metric list)) Hashtbl.t =
+let all_measures : (string (* name *),
+                    string (* help *) * (unit -> metric list)) Hashtbl.t =
   Hashtbl.create 71
 
 module Priv_ =
@@ -77,39 +78,28 @@ struct
     2 (wrap (max_int - 5 + 8))
    *)
 
-  let now_us now =
-    let now_s = int_of_float now in
-    let now_us =
-      (now -. float_of_int now_s) *. 1_000_000.0 |> round_to_int in
-    Printf.sprintf "%d%06d" now_s now_us
+  let now_ms now =
+    Printf.sprintf "%.0f" (now *. 1000.)
 
-  (*$= now_us & ~printer:BatPervasives.identity
-    "1395066363000" (now_us 1395066.363)
-    "1395066363042" (now_us 1395066.363042)
-    "1395066000042" (now_us 1395066.000042)
+  (*$= now_ms & ~printer:BatPervasives.identity
+    "1395066363" (now_ms 1395066.363)
+    "1395066363" (now_ms 1395066.363042)
+    "1395066000" (now_ms 1395066.000042)
    *)
 
-  let print_val to_string name labels now oc x =
-    Printf.fprintf oc "%s{" name ;
-    List.iteri (fun i label ->
-        Printf.fprintf oc "%s%a"
-          (if i > 0 then "," else "") print_label label
-      ) labels ;
-    Printf.fprintf oc "} %s %s\n" (to_string x) now
+  let string_forall f s =
+    try
+      for i = 0 to String.length s - 1 do
+        if not (f (String.unsafe_get s i)) then raise Exit
+      done ;
+      true
+    with Exit ->
+      false
 
-  (* Gauges are made of three values (min, value, max): *)
-  let print_gauge to_string name labels now oc (mi, x, ma) =
-    print_val to_string name labels now oc x ;
-    print_val to_string (name ^"_min") labels now oc mi ;
-    print_val to_string (name ^"_max") labels now oc ma
-
-  let print_option printer to_string name labels now oc xr =
-    match !xr with
-    | Some x -> printer to_string name labels now oc x
-    | None -> ()
-
-  let print_val_option to_string = print_option print_val to_string
-  let print_gauge_option to_string = print_option print_gauge to_string
+  (*$= string_forall & ~printer:string_of_bool
+    true  (string_forall (fun c -> c >= '0' && c <= '9') "123123")
+    false (string_forall (fun c -> c >= '0' && c <= '9') "1231x3")
+  *)
 
   let with_open_fd fname ro f =
     let open Legacy.Unix in
@@ -155,7 +145,6 @@ struct
 
   type t =
     { name : string ;
-      help : string ;
       save_file : string option ;
       mutable per_labels : per_labels ;
       mutable last_read_file : float }
@@ -223,7 +212,7 @@ struct
     Hashtbl.fold (fun labels m lst ->
       export_measure m |>
       List.fold_left (fun lst (kind, measure) ->
-        { name = t.name ; labels ; kind ; measure } :: lst
+        { labels ; kind ; measure } :: lst
       ) lst
     ) t.per_labels []
 
@@ -236,7 +225,7 @@ struct
     let save_file = Option.map (fun d -> d ^"/"^ name) save_dir in
     assert (not (Hashtbl.mem all_measures name)) ;
     let make_new () =
-      { name ; help ; per_labels = Hashtbl.create 17 ; save_file ;
+      { name ; per_labels = Hashtbl.create 17 ; save_file ;
         last_read_file = 0. } in
     let t =
       match save_file with
@@ -245,7 +234,7 @@ struct
           let t =
             try
               Priv_.with_locked_fd fname true (fun fd ->
-                { name ; help ; per_labels = of_file fd ; save_file ;
+                { name ; per_labels = of_file fd ; save_file ;
                   last_read_file = 0. })
             with e ->
               last_error := Some e ;
@@ -259,15 +248,6 @@ struct
     Hashtbl.add all_measures name
       (help, (fun () -> export_all export_measure t)) ;
     t
-
-  (* Kind-of following Prometheus style *)
-  let print print_measure now oc t =
-    let now_us = Priv_.now_us now in
-    Printf.fprintf oc "# HELP %s %s\n" t.name t.help ;
-    Hashtbl.iter (fun labels m ->
-        print_measure t.name labels now_us oc m
-      ) t.per_labels ;
-    Printf.fprintf oc "\n"
 end
 
 (* An int counter is the simplest of all measures.
@@ -300,10 +280,6 @@ struct
    * same persisted metric) *)
   let get ?labels t =
     try !(L.get ?labels t) with Not_found -> 0
-
-  (* Print the value kind-of Prometheus way *)
-  let print now oc t =
-    L.print (Priv_.print_val (fun m -> string_of_int !m)) now oc t
 end
 
 (* Float counters do not wrap around. Floats make actually very poor counters
@@ -332,9 +308,6 @@ struct
 
   let get ?labels t =
     try !(L.get ?labels t) with Not_found -> 0.
-
-  let print now oc t =
-    L.print (Priv_.print_val (fun m -> string_of_float !m)) now oc t
 end
 
 (* TODO: A special kind of gauge that keeps only the min/max? *)
@@ -376,9 +349,6 @@ struct
 
   let inc ?labels t = add ?labels t 1
   let dec ?labels t = add ?labels t ~-1
-
-  let print now oc t =
-    L.print (Priv_.print_gauge_option string_of_int) now oc t
 end
 
 module FloatGauge =
@@ -418,9 +388,6 @@ struct
 
   let inc ?labels t = add ?labels t 1.
   let dec ?labels t = add ?labels t ~-.1.
-
-  let print now oc t =
-    L.print (Priv_.print_gauge_option string_of_float) now oc t
 end
 
 module StringValue =
@@ -442,9 +409,6 @@ struct
 
   let get ?labels t =
     try !(L.get ?labels t) with Not_found -> None
-
-  let print now oc t =
-    L.print (Priv_.print_val_option identity) now oc t
 end
 
 module StringConst =
@@ -456,9 +420,6 @@ struct
     s, L.make export name help
 
   let get ?labels t = L.get ?labels t
-
-  let print now oc t =
-    L.print (Priv_.print_val identity) now oc t
 end
 
 module Timestamp = FloatGauge
@@ -530,13 +491,11 @@ struct
   let get ?labels t =
     try Some (L.get ?labels t) with Not_found -> None
 
-  let print now oc t =
-    let print_perf name labels now oc p =
-      Priv_.print_val string_of_int (name ^".count") labels now oc p.count ;
-      Priv_.print_val string_of_float (name ^".user") labels now oc p.user ;
-      Priv_.print_val string_of_float (name ^".system") labels now oc p.system
-    in
-    L.print print_perf now oc t
+  (* FIXME: have instead 3 counters with different labels
+  let print_perf name labels now oc p =
+    Priv_.print_val string_of_int (name ^".count") labels now oc p.count ;
+    Priv_.print_val string_of_float (name ^".user") labels now oc p.user ;
+    Priv_.print_val string_of_float (name ^".system") labels now oc p.system *)
 end
 
 (* Return a single measure composed of several buckets *)
@@ -559,11 +518,12 @@ struct
           i+1
         ) m.counts 0 |> ignore ;
       Array.sort (fun (mi1, _, _) (mi2, _, _) ->
-          compare mi1 mi2
+          Float.compare mi1 mi2
         ) a ;
       if Array.length a > 0 then
-        [ Histogram, MHistogram a ]
-      else [] in
+        [ Histogram, MHistogram (a, m.sum) ]
+      else []
+    in
     bucket_of_value, L.make ?save_dir export name help
 
   let add (bucket_of_value, t) =
@@ -579,24 +539,6 @@ struct
       { counts = Hashtbl.create 11 ; sum = 0. } in
     L.labeled_observation make observe t
 
-  let print now oc (_, t) =
-    let print_measure name labels now_us oc histo =
-      let count =
-        let name_bucket = name ^"_bucket" in
-        let buckets =
-          Hashtbl.fold (fun _k v lst -> v :: lst) histo.counts [] |>
-          List.fast_sort (fun (ma1, _) (ma2, _) ->
-            compare (ma1:float) (ma2:float)) in
-        List.fold_left (fun count (ma, c) ->
-            let count = count + c in
-            let labels = ("le", string_of_float ma) :: labels in
-            Priv_.print_val string_of_int name_bucket labels now_us oc count ;
-            count
-          ) 0 buckets in
-      Priv_.print_val string_of_float (name ^"_sum") labels now_us oc histo.sum ;
-      Priv_.print_val string_of_int (name ^"_count") labels now_us oc count in
-    L.print print_measure now oc t
-
   (* bucket_of_value ideas: *)
   let linear_buckets bucket_size v =
     let mi = floor (v /. bucket_size) *. bucket_size in
@@ -610,42 +552,6 @@ struct
     let cei = if cei = flo then cei +. 1. else cei in
     2. ** flo, 2. ** cei
 end
-
-(*$R
-  let query_count =
-    IntCounter.make "test_counter" "Demo of a labelled counter" in
-  IntCounter.add query_count ~labels:["context","test"; "status","ok"] 40 ;
-  IntCounter.add query_count ~labels:["context","test"; "status","ok"] 2 ;
-  IntCounter.add query_count ~labels:["context","test"; "status","nok"] 7 ;
-  let s = BatIO.to_string (IntCounter.print 1500136019.012674) query_count in
-  assert_equal ~printer:BatPervasives.identity
-    "# HELP test_counter Demo of a labelled counter\n\
-     test_counter{context=\"test\",status=\"ok\"} 42 1500136019012674\n\
-     test_counter{context=\"test\",status=\"nok\"} 7 1500136019012674\n\n" s ;
-
-  let response_time =
-    Histogram.make "test_histo" "Demo of a labelled histogram" (Histogram.linear_buckets 1.) in
-  Histogram.add response_time ~labels:["context","test"; "status","ok"] 0.1 ;
-  Histogram.add response_time ~labels:["context","test"; "status","ok"] 0.12 ;
-  Histogram.add response_time ~labels:["context","test"; "status","ok"] 1.5 ;
-  let s = BatIO.to_string (Histogram.print 1500136019.000001) response_time in
-  assert_equal ~printer:BatPervasives.identity
-    "# HELP test_histo Demo of a labelled histogram\n\
-     test_histo_bucket{le=\"1.\",context=\"test\",status=\"ok\"} 2 1500136019000001\n\
-     test_histo_bucket{le=\"2.\",context=\"test\",status=\"ok\"} 3 1500136019000001\n\
-     test_histo_sum{context=\"test\",status=\"ok\"} 1.72 1500136019000001\n\
-     test_histo_count{context=\"test\",status=\"ok\"} 3 1500136019000001\n\n" s ;
-
-  let ram_usage =
-    IntGauge.make "test_gauge" "Demo of a labelled gauge" in
-  IntGauge.set ram_usage ~labels:["context","test"] 42 ;
-  let s = BatIO.to_string (IntGauge.print 1500136019.000001) ram_usage in
-  assert_equal ~printer:BatPervasives.identity
-    "# HELP test_gauge Demo of a labelled gauge\n\
-     test_gauge{context=\"test\"} 42 1500136019000001\n\
-     test_gauge_min{context=\"test\"} 42 1500136019000001\n\
-     test_gauge_max{context=\"test\"} 42 1500136019000001\n\n" s
- *)
 
 (*
  * Utility functions to print (on console) all known metrics:
@@ -692,9 +598,7 @@ let display_measure oc = function
         (grey (string_of_int ma))
   | MString v ->
       Printf.fprintf oc " %s" (blue v)
-  | MHistogram v ->
-      let bucket_cmp (v1, _, _) (v2, _, _) = Float.compare v1 v2 in
-      Array.fast_sort bucket_cmp v ;
+  | MHistogram (v, _) ->
       let v = Array.map (fun (mi, ma, n) ->
                 Printf.sprintf "%f..%f" mi ma,
                 Printf.sprintf "%d" n,
@@ -725,3 +629,160 @@ let display_console () =
           stdout metrics
   ) all_measures ;
   Printf.printf "%!"
+
+(*
+ * Expose the measures in Prometheus format
+ *)
+module Prometheus =
+struct
+  (*$< Prometheus *)
+
+  let print_val to_string name labels now oc x =
+    Printf.fprintf oc "%s{" name ;
+    List.iteri (fun i label ->
+        Printf.fprintf oc "%s%a"
+          (if i > 0 then "," else "") print_label label
+      ) labels ;
+    Printf.fprintf oc "} %s %s\n" (to_string x) now
+
+  let make_valid_name =
+    let is_valid_first c =
+      (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_' || c = ':' in
+    let is_valid c =
+      is_valid_first c || (c >= '0' && c <= '9') in
+    fun s ->
+      let s =
+        if s <> "" then s else "_" in
+      let s =
+        if is_valid_first s.[0] then s else "_" ^ s in
+      let s =
+        if Priv_.string_forall is_valid s then s else
+        String.map (fun c -> if is_valid c then c else '_') s in
+      s
+
+  let expose_per_label now_ms name oc t =
+    let p print_measure v =
+      print_measure name t.labels now_ms oc v
+    in
+    match t.measure with
+    | MInt v ->
+        p (print_val string_of_int) v
+    | MFloat v ->
+        p (print_val string_of_float) v
+    | MFloatRange (_, v, _) ->
+        p (print_val string_of_float) v
+    | MIntRange (_, v, _) ->
+        p (print_val string_of_int) v
+    | MString v ->
+        p (print_val identity) v
+    | MHistogram (v, s) ->
+      let print_measure name labels now_ms oc v =
+        let count =
+          let name_bucket = name ^"_bucket" in
+          Array.fold_left (fun count (_mi, ma, c) ->
+              let count = count + c in
+              let labels = ("le", string_of_float ma) :: labels in
+              print_val string_of_int name_bucket labels now_ms oc count ;
+              count
+            ) 0 v in
+        print_val string_of_float (name ^"_sum") labels now_ms oc s ;
+        print_val string_of_int (name ^"_count") labels now_ms oc count
+      in
+      p print_measure v
+
+  let expose_metrics now_ms namespace name help oc metrics =
+    let name = namespace ^"_"^ name |> make_valid_name in
+    (* It is expected all label sets will have the same type: *)
+    let m1 = List.hd metrics in
+    (* For ranges we fake to have 3 individual metrics: *)
+    let mis, vs, mas =
+      List.fold_left (fun (mis, vs, mas) t ->
+        match t.measure with
+        | MFloatRange (mi, v, ma) ->
+            { t with measure = MFloat mi } :: mis,
+            { t with measure = MFloat v } :: vs,
+            { t with measure = MFloat ma } :: mas
+        | MIntRange (mi, v, ma) ->
+            { t with measure = MInt mi } :: mis,
+            { t with measure = MInt v } :: vs,
+            { t with measure = MInt ma } :: mas
+        | _ ->
+            mis, t :: vs, mas
+      ) ([], [], []) metrics in
+    let expose name help metrics =
+      Printf.fprintf oc "# HELP %s %s\n" name help ;
+      assert (metrics <> []) ;
+      let typ =
+        match m1.kind with
+        | Counter -> "counter"
+        | Gauge -> "gauge"
+        | Histogram -> "histogram" in
+      Printf.fprintf oc "# TYPE %s %s\n" name typ ;
+      List.print ~first:"" ~last:"\n" ~sep:""
+        (expose_per_label now_ms name) oc metrics
+    in
+    expose name help vs ;
+    if mis <> [] then expose (name ^"_min") (help ^" (min)") mis ;
+    if mas <> [] then expose (name ^"_max") (help ^" (max)") mas
+
+  let expose namespace now oc measures =
+    let now_ms = Priv_.now_ms now in
+    Hashtbl.iter (fun name (help, export) ->
+      match export () with
+      | [] -> ()
+      | metrics ->
+          expose_metrics now_ms namespace name help oc metrics
+    ) measures ;
+    Printf.fprintf oc "%!"
+
+  (*$R
+    let query_count =
+      IntCounter.make "counter" "Demo of a labelled counter" in
+    IntCounter.add query_count ~labels:["context","test"; "status","ok"] 40 ;
+    IntCounter.add query_count ~labels:["context","test"; "status","ok"] 2 ;
+    IntCounter.add query_count ~labels:["context","test"; "status","nok"] 7 ;
+    let to_string n =
+      let now_ms = Priv_.now_ms 1500136019.012674 in
+      let help, metrics = Hashtbl.find all_measures n in
+      BatIO.to_string (expose_metrics now_ms "test" n help) (metrics ()) in
+    assert_equal ~printer:BatPervasives.identity
+      "# HELP test_counter Demo of a labelled counter\n\
+       # TYPE test_counter counter\n\
+       test_counter{context=\"test\",status=\"ok\"} 42 1500136019013\n\
+       test_counter{context=\"test\",status=\"nok\"} 7 1500136019013\n\n"
+      (to_string "counter") ;
+
+    let response_time =
+      Histogram.make "histo" "Demo of a labelled histogram" (Histogram.linear_buckets 1.) in
+    Histogram.add response_time ~labels:["context","test"; "status","ok"] 0.1 ;
+    Histogram.add response_time ~labels:["context","test"; "status","ok"] 0.12 ;
+    Histogram.add response_time ~labels:["context","test"; "status","ok"] 1.5 ;
+    assert_equal ~printer:BatPervasives.identity
+      "# HELP test_histo Demo of a labelled histogram\n\
+       # TYPE test_histo histogram\n\
+       test_histo_bucket{le=\"1.\",context=\"test\",status=\"ok\"} 2 1500136019013\n\
+       test_histo_bucket{le=\"2.\",context=\"test\",status=\"ok\"} 3 1500136019013\n\
+       test_histo_sum{context=\"test\",status=\"ok\"} 1.72 1500136019013\n\
+       test_histo_count{context=\"test\",status=\"ok\"} 3 1500136019013\n\n"
+      (to_string "histo") ;
+
+    let ram_usage =
+      IntGauge.make "gauge" "Demo of a labelled gauge" in
+    IntGauge.set ram_usage ~labels:["context","test"] 42 ;
+    assert_equal ~printer:BatPervasives.identity
+      "# HELP test_gauge Demo of a labelled gauge\n\
+       # TYPE test_gauge gauge\n\
+       test_gauge{context=\"test\"} 42 1500136019013\n\
+       \n\
+       # HELP test_gauge_min Demo of a labelled gauge (min)\n\
+       # TYPE test_gauge_min gauge\n\
+       test_gauge_min{context=\"test\"} 42 1500136019013\n\
+       \n\
+       # HELP test_gauge_max Demo of a labelled gauge (max)\n\
+       # TYPE test_gauge_max gauge\n\
+       test_gauge_max{context=\"test\"} 42 1500136019013\n\n"
+      (to_string "gauge")
+   *)
+
+  (*$>*)
+end

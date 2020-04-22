@@ -3,12 +3,12 @@
 
 stdenv.mkDerivation rec {
   pname = "ocaml${ocaml.version}-binocle";
-  version = "0.11.0";
+  version = "0.12.0";
 
   src = fetchFromGitHub {
     owner = "rixed";
     repo = "binocle";
-    rev = "v0.11.0";
+    rev = "v${version}";
     sha256 = "1pjckmzskwg8r79k1xvbi9nqcly2nxicpxxpsaa8dnjyav0hwf6z";
   };
 

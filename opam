@@ -1,5 +1,5 @@
 opam-version: "1.2"
-version: "0.11.0"
+version: "0.12.0"
 name: "binocle"
 maintainer: "rixed-github@happyleptic.org"
 homepage: "http://github.com/rixed/binocle/"
@@ -19,8 +19,9 @@ remove: [
 ]
 
 depends: [
-  "ocamlfind" {build}
   "batteries"
+  "net_codecs"
+  "ocamlfind" {build}
   "ppp"
   "qtest" {test & >= "2.0.0"}
 ]
