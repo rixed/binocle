@@ -21,7 +21,7 @@ type measure =
   | MFloatRange of (float * float * float) (* min, value, max *)
   | MIntRange of (int * int * int) (* min, value, max *)
   | MString of string
-  | MHistogram of (float * float * int) array
+  | MHistogram of ((float * float * int) array * float)
 
 type kind = Counter | Gauge | Histogram
 
@@ -37,7 +37,8 @@ type metric =
   { name : string ;
     kind : kind ;
     labels : label list ;
-    measure : measure }
+    measure : measure ;
+    help : string }
 
 let all_measures : (string, string * (unit -> metric list)) Hashtbl.t =
   Hashtbl.create 71
@@ -207,7 +208,7 @@ struct
     Hashtbl.fold (fun labels m lst ->
       export_measure m |>
       List.fold_left (fun lst (kind, measure) ->
-        { name = t.name ; labels ; kind ; measure } :: lst
+        { name = t.name ; labels ; kind ; measure; help = t.help } :: lst
       ) lst
     ) t.per_labels []
 
@@ -543,7 +544,7 @@ struct
           compare mi1 mi2
         ) a ;
       if Array.length a > 0 then
-        [ Histogram, MHistogram a ]
+        [ Histogram, MHistogram (a, m.sum) ]
       else [] in
     bucket_of_value, L.make ?save_dir export name help
 
@@ -673,7 +674,7 @@ let display_measure oc = function
         (grey (string_of_int ma))
   | MString v ->
       Printf.fprintf oc " %s" (blue v)
-  | MHistogram v ->
+  | MHistogram (v, _) ->
       let bucket_cmp (v1, _, _) (v2, _, _) = Float.compare v1 v2 in
       Array.fast_sort bucket_cmp v ;
       let v = Array.map (fun (mi, ma, n) ->
@@ -706,3 +707,48 @@ let display_console () =
           stdout metrics
   ) all_measures ;
   Printf.printf "%!"
+
+
+(* Kind-of following Prometheus style *)
+let print_ print_measure now oc t v =
+  let now_us = Priv_.now_us now in
+  Printf.fprintf oc "# HELP %s %s\n" t.name t.help ;
+  print_measure t.name t.labels now_us oc v ;
+  Printf.fprintf oc "\n"
+
+let print now oc t =
+  match t.measure with
+  | MInt v ->
+      print_ (Priv_.print_val string_of_int) now oc t v
+  | MFloat v ->
+      print_ (Priv_.print_val string_of_float) now oc t v
+  | MFloatRange v ->
+      print_ (Priv_.print_gauge string_of_float) now oc t v
+  | MIntRange v ->
+      print_ (Priv_.print_gauge string_of_int) now oc t v
+  | MString v ->
+      print_ (Priv_.print_val identity) now oc t v
+  | MHistogram (v, s) ->
+    let print_measure name labels now_us oc v =
+      let count =
+        let name_bucket = name ^"_bucket" in
+        Array.fold_left (fun count (_mi, ma, c) ->
+            let count = count + c in
+            let labels = ("le", string_of_float ma) :: labels in
+            Priv_.print_val string_of_int name_bucket labels now_us oc count ;
+            count
+          ) 0 v in
+      Priv_.print_val string_of_float (name ^"_sum") labels now_us oc s ;
+      Priv_.print_val string_of_int (name ^"_count") labels now_us oc count in
+      print_ print_measure now oc t v
+
+let print_prometheus_measure oc = 
+  Hashtbl.iter (fun _ (_, export) ->
+    let now = Unix.time () /. 1000. in
+    match export () with
+    | [] -> ()
+    | metrics ->
+        List.print ~first:"" ~last:"\n\n" ~sep:"\n" (print now)
+          oc metrics
+  ) all_measures ;
+  Printf.fprintf oc "%!"

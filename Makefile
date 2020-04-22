@@ -10,14 +10,21 @@ TESTABLE_SOURCES = \
 BINOCLE_SOURCES = \
 	Binocle.ml
 
-SOURCES = \
-	$(BINOCLE_SOURCES)
+BINOCLE_THREAD_SOURCES = \
+	BinocleThread.ml
 
-PACKAGES = batteries ppp.ppx
+SOURCES = \
+	$(BINOCLE_SOURCES)\
+	$(BINOCLE_THREAD_SOURCES)
+
+PACKAGES = batteries ppp.ppx net_codecs
+THREAD_PACKAGES = net_codecs parsercombinator
 
 INSTALLED = \
-	META Binocle.cma $(BINOCLE_SOURCES:.ml=.cmi) \
-	Binocle.cmxa Binocle.a $(BINOCLE_SOURCES:.ml=.cmx)
+	META Binocle.cma $(SOURCES:.ml=.cmi) \
+	Binocle.cmxa Binocle.a $(SOURCES:.ml=.cmx) \
+	BinocleThread.cma \
+	BinocleThread.cmxa BinocleThread.a
 
 all: $(INSTALLED)
 
@@ -31,8 +38,16 @@ Binocle.cma: $(BINOCLE_SOURCES:.ml=.cmo)
 
 Binocle.a: Binocle.cmxa
 
+BinocleThread.cmxa: BinocleThread.cmx
+	$(OCAMLOPT) -thread $(OCAMLOPTFLAGS) -a $(filter %.cmx, $^) -o $@
+
+BinocleThread.cma: BinocleThread.cmo
+	$(OCAMLC) -thread $(OCAMLFLAGS) -a $(filter %.cmo, $^) -o $@
+
+BinocleThread.a: BinocleThread.cmxa
+
 clean-spec:
-	$(RM) Binocle.cmxa Binocle.cma Binocle.cmx
+	$(RM) $(wildcard *.cmxa *.cmx *.cma)
 
 check-spec:
 
