@@ -25,7 +25,7 @@ type measure =
 
 type kind = Counter | Gauge | Histogram
 
-type label = string * string
+type label = string * string (* name, value *)
   [@@ppp PPP_OCaml]
 
 let print_label oc (l, v) = Printf.fprintf oc "%s=%S" l v
@@ -33,12 +33,17 @@ let print_label oc (l, v) = Printf.fprintf oc "%s=%S" l v
 let print_labels oc labels =
   List.print ~first:"{" ~last:"}" ~sep:"," print_label oc labels
 
+(* As all the metrics defined by the `Labeled` functor do not have the same type
+ * they are mapped to this `metric` type to process them all at once, in the
+ * `display_console` function for example. *)
 type metric =
   { name : string ;
     kind : kind ;
     labels : label list ;
     measure : measure }
 
+(* Contains all the metrics indexed by name.
+ * Values are a pair with their help string and export function. *)
 let all_measures : (string, string * (unit -> metric list)) Hashtbl.t =
   Hashtbl.create 71
 
@@ -139,8 +144,12 @@ struct
   (*$>*)
 end
 
+(* From a base type [t], creates the basic functions to associate measures
+ * of that type and labels. This module is then included in all actual
+ * instrumentation metric types. *)
 module Labeled (T : sig type t val t_ppp_ocaml : t PPP.t end) =
 struct
+  (* Metrics are identified by a label set *)
   type per_labels = (label list, T.t) Hashtbl.t
     [@@ppp PPP_OCaml]
 
@@ -167,6 +176,12 @@ struct
 
   let rate_limited_log = Priv_.make_rate_limited 5.
 
+  (* Add an observation.
+   * [make_measure] creates a new measure if [labels] are encountered
+   *   for the first time.
+   * [observe] modify an existing measure.
+   * [t] is the metric we want to add the observation to.
+   * [labels] identify the observed metric. *)
   let labeled_observation make_measure observe t ?(labels=[]) v =
     let labels = List.fast_sort Pervasives.compare labels in
     let update () =
@@ -203,6 +218,7 @@ struct
   let get ?(labels=[]) t =
     Hashtbl.find t.per_labels labels
 
+  (* This function is to export measure to a general type *)
   let export_all export_measure t =
     Hashtbl.fold (fun labels m lst ->
       export_measure m |>
@@ -211,8 +227,11 @@ struct
       ) lst
     ) t.per_labels []
 
-  (* If [save_dir] is set then current value of the counter will be saved
-   * in this file at exit, and loaded from it at creation: *)
+  (* Makes a new metric.
+   * [export_measure] is a function that convert a single measure to the more
+   * general type [measure].
+   * If [save_dir] is set then value of the measure will be read from and
+   * written to this location after every new observation *)
   let make export_measure ?save_dir name help =
     let save_file = Option.map (fun d -> d ^"/"^ name) save_dir in
     assert (not (Hashtbl.mem all_measures name)) ;
