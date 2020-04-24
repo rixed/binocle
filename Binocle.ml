@@ -26,6 +26,9 @@ type measure =
 type kind = Counter | Gauge | Histogram
 
 type label = string * string
+              (* label name, value.
+               *  i.e  ("http", "403")
+               *)
   [@@ppp PPP_OCaml]
 
 let print_label oc (l, v) = Printf.fprintf oc "%s=%S" l v
@@ -33,12 +36,22 @@ let print_label oc (l, v) = Printf.fprintf oc "%s=%S" l v
 let print_labels oc labels =
   List.print ~first:"{" ~last:"}" ~sep:"," print_label oc labels
 
+(* This type is to export all metrics defined with
+ * `Labeled` functor.
+ * As all the metrics defined by the `Labeled` functor do not have the same type
+ * we map them to this `metric` type to treat them all at once, with
+ * `display_console` function for example.
+ *)
 type metric =
   { name : string ;
     kind : kind ;
     labels : label list ;
     measure : measure }
 
+(* Contains all the metrics.
+ * keys are their names.
+ * values are a tuple with their help string and export function.
+ *)
 let all_measures : (string, string * (unit -> metric list)) Hashtbl.t =
   Hashtbl.create 71
 
@@ -139,8 +152,18 @@ struct
   (*$>*)
 end
 
+(* This module represents a measure.
+ * It is parametrized by the type of the measure.
+ * By example, Labeled(struct type t int end) will represent a measure
+ * an int measure.
+ * Actually we also add the ppp attribute to dump measures. So the complete
+ * definition will be Labeled(struct type t = int [@@ppp PPP_OCaml] end)
+ *)
 module Labeled (T : sig type t val t_ppp_ocaml : t PPP.t end) =
 struct
+  (* Measure can be organized by labels.
+   * see here https://prometheus.io/docs/practices/naming/#labels
+   *)
   type per_labels = (label list, T.t) Hashtbl.t
     [@@ppp PPP_OCaml]
 
@@ -151,10 +174,12 @@ struct
       mutable per_labels : per_labels ;
       mutable last_read_file : float }
 
+  (* read from file `per_labels` dump *)
   let of_file fd =
     let ic = Legacy.Unix.in_channel_of_descr fd in
     PPP.of_in_channel_exc per_labels_ppp_ocaml ic
 
+  (* write to file `per_labels` dump *)
   let to_file fname v =
     try
       Priv_.with_locked_fd fname false (fun fd ->
@@ -167,6 +192,12 @@ struct
 
   let rate_limited_log = Priv_.make_rate_limited 5.
 
+  (* add an observation.
+   * `make_measure` creates the measure if it doesn't exist.
+   * `observe` modify the measure.
+   * `t` is the metric we want to add the observation to.
+   * `labels` set to which labels the observation belongs to.
+   *)
   let labeled_observation make_measure observe t ?(labels=[]) v =
     let labels = List.fast_sort Pervasives.compare labels in
     let update () =
@@ -200,9 +231,12 @@ struct
           update () ;
           to_file fname t.per_labels)
 
+  (* Returns the wanted observation *)
   let get ?(labels=[]) t =
     Hashtbl.find t.per_labels labels
 
+  (* This function is to export measure to a general
+   * type *)
   let export_all export_measure t =
     Hashtbl.fold (fun labels m lst ->
       export_measure m |>
@@ -211,7 +245,13 @@ struct
       ) lst
     ) t.per_labels []
 
-  (* If [save_dir] is set then current value of the counter will be saved
+  (* makes a new measure.
+   * `export_measure` is a function that convert a measure to the more
+   *      general type measure.
+   * `save_dir` set this to Some ("where/i/save/my_file") if needed.
+   * `name` name of the measure.
+   * `help` help of the measure.
+   * If [save_dir] is set then current value of the counter will be saved
    * in this file at exit, and loaded from it at creation: *)
   let make export_measure ?save_dir name help =
     let save_file = Option.map (fun d -> d ^"/"^ name) save_dir in
