@@ -437,8 +437,8 @@ struct
    * type [perf]: *)
 
   (* Might start to time, or do nothing: *)
-  let start () =
-    if Random.float 1. <= 0.01 then Some (Unix.times ())
+  let start ?(rate=0.01) ()=
+    if Random.float 1. <= rate then Some (Unix.times ())
     else None
 
   let stop_ start =
