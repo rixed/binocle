@@ -9,7 +9,7 @@ let http_msg ?(code=200) ?(headers=[]) body =
   let headers =
     ("Access-Control-Allow-Origin", "*") ::
     ("Content-Length", String.length body |> string_of_int) ::
-    ("Content-Type", "application/json") :: headers in
+    ("Content-Type", "text/plain") :: headers in
   CodecHttp.(Msg.{
     start_line = StartLine.Response StatusLine.{
       version = 1, 1 ;
