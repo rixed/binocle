@@ -223,7 +223,8 @@ struct
    * written to this location after every new observation *)
   let make export_measure ?save_dir name help =
     let save_file = Option.map (fun d -> d ^"/"^ name) save_dir in
-    assert (not (Hashtbl.mem all_measures name)) ;
+    if Hashtbl.mem all_measures name then
+      failwith ("Metric "^ name ^" defined several times") ;
     let make_new () =
       { name ; per_labels = Hashtbl.create 17 ; save_file ;
         last_read_file = 0. } in
