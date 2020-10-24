@@ -22,6 +22,6 @@ depends: [
   "batteries"
   "net_codecs"
   "ocamlfind" {build}
-  "ppp"
+  "ppp" {>= "2.8.5"}
   "qtest" {test & >= "2.0.0"}
 ]
