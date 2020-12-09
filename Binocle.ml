@@ -119,15 +119,20 @@ struct
           (BatUnix.restart_on_EINTR lockf fd F_ULOCK) 0)
         f fd)
 
+  (* Returns the first few bytes of a file, or "ERROR" *)
   let beginning_of_file ?(max=20) fname =
     let res = Bytes.create max in
-    with_open_fd fname true (fun fd ->
-      let rec loop o =
-        if o >= max then res else
-        let r = Unix.(restart_on_EINTR read fd res o) (max - o) in
-        if r = 0 then Bytes.sub res 0 o else
-        loop (o + r) in
-      loop 0 |> Bytes.to_string)
+    try
+      with_open_fd fname true (fun fd ->
+        let rec loop o =
+          if o >= max then res else
+          let r = Unix.(restart_on_EINTR read fd res o) (max - o) in
+          if r = 0 then Bytes.sub res 0 o else
+          loop (o + r) in
+        loop 0 |> Bytes.to_string)
+    with e ->
+      last_error := Some e ;
+      "ERROR"
 
   let mtime_of_fd fname =
     Unix.((restart_on_EINTR fstat fname).st_mtime)
@@ -161,7 +166,8 @@ struct
         ignore_exceptions (fun () ->
           PPP.to_out_channel per_labels_ppp_ocaml oc v ;
           Legacy.flush oc) ())
-    with e -> last_error := Some e
+    with e ->
+      last_error := Some e
 
   let rate_limited_log = Priv_.make_rate_limited 5.
 
@@ -187,22 +193,31 @@ struct
     | Some fname ->
         (* Maybe another program changed the saved value. If so, reload it
          * before proceeding: *)
-        Priv_.with_locked_fd fname false (fun fd ->
-          let last_changed = Priv_.mtime_of_fd fd
-          and now = Unix.gettimeofday () in
-          if last_changed >= t.last_read_file then (
-            t.last_read_file <- now ;
-            try t.per_labels <- of_file fd
-            with e ->
-              last_error := Some e ;
-              rate_limited_log now (fun () ->
-                Printf.eprintf "Could not read %s (%S): %s\n%s.\nIgnoring...\n%!"
-                  fname
-                  (Priv_.beginning_of_file fname)
-                  (Printexc.to_string e)
-                  (Printexc.get_backtrace ()))) ;
-          update () ;
-          to_file fname t.per_labels)
+        let now = Unix.gettimeofday () in
+        try
+          Priv_.with_locked_fd fname false (fun fd ->
+            let last_changed = Priv_.mtime_of_fd fd in
+            if last_changed >= t.last_read_file then (
+              t.last_read_file <- now ;
+              try t.per_labels <- of_file fd
+              with e ->
+                last_error := Some e ;
+                rate_limited_log now (fun () ->
+                  Printf.eprintf "Could not read %s (%S): %s\n%s.\nIgnoring...\n%!"
+                    fname
+                    (Priv_.beginning_of_file fname)
+                    (Printexc.to_string e)
+                    (Printexc.get_backtrace ()))) ;
+            update () ;
+            to_file fname t.per_labels)
+        with e ->
+          last_error := Some e ;
+          rate_limited_log now (fun () ->
+            Printf.eprintf "Could not open %s: %s\n%s.\nIgnoring...\n%!"
+              fname
+              (Printexc.to_string e)
+              (Printexc.get_backtrace ())) ;
+          update () (* Since to_file does not raise *)
 
   let get ?(labels=[]) t =
     Hashtbl.find t.per_labels labels
@@ -237,6 +252,7 @@ struct
               Priv_.with_locked_fd fname true (fun fd ->
                 { name ; per_labels = of_file fd ; save_file ;
                   last_read_file = 0. })
+              (* Little need to test writing if reading worked *)
             with e ->
               last_error := Some e ;
               let t = make_new () in
