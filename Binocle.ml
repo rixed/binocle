@@ -1,6 +1,6 @@
 open Batteries
 
-let version = "v0.12.1"
+let version = "v0.12.2"
 
 (* For convenience, we'd rather use top level variables for metrics, which will
  * be implicitly initialized during modules initialization. The problem is that

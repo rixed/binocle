@@ -1,5 +1,5 @@
 description = "Instrumentation for OCaml programs"
-version = "0.12.1"
+version = "0.12.2"
 archive(byte) = "Binocle.cma"
 archive(native) = "Binocle.cmxa"
 requires = "findlib batteries ppp unix"

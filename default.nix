@@ -3,7 +3,7 @@
 
 stdenv.mkDerivation rec {
   pname = "ocaml${ocaml.version}-binocle";
-  version = "0.12.1";
+  version = "0.12.2";
 
   src = fetchFromGitHub {
     owner = "rixed";
