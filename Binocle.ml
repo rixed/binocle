@@ -591,39 +591,42 @@ let window_width =
       Scanf.sscanf s "%d %d" (fun _h w -> w)
     with _ -> 80)
 
-let colored ansi =
-  Printf.sprintf "\027[%sm%s\027[0m" ansi
+let colored ?(colors=true) ansi =
+  if colors then
+    Printf.sprintf "\027[%sm%s\027[0m" ansi
+  else
+    Printf.sprintf "%s"
 
-let grey = colored "1;30"
-let red = colored "1;31"
-let green = colored "1;32"
-let yellow = colored "1;33"
-let blue = colored "1;34"
-let magenta = colored "1;35"
-let cyan = colored "1;36"
-let white = colored "1;37"
+let grey ?colors = colored ?colors "1;30"
+let red ?colors = colored ?colors "1;31"
+let green ?colors = colored ?colors "1;32"
+let yellow ?colors = colored ?colors "1;33"
+let blue ?colors = colored ?colors "1;34"
+let magenta ?colors = colored ?colors "1;35"
+let cyan ?colors = colored ?colors "1;36"
+let white ?colors = colored ?colors "1;37"
 
 let make_bar n max_n max_width =
   let l = (n * max_width) / max_n in
   String.make l '='
 
-let display_measure oc = function
+let display_measure ?colors oc = function
   | MFloat v ->
-      Printf.fprintf oc " %s" (blue (string_of_float v))
+      Printf.fprintf oc " %s" (blue ?colors (string_of_float v))
   | MInt v ->
-      Printf.fprintf oc " %s" (blue (string_of_int v))
+      Printf.fprintf oc " %s" (blue ?colors (string_of_int v))
   | MFloatRange (mi, v, ma) ->
       Printf.fprintf oc " %s.. %s ..%s"
-        (grey (string_of_float mi))
-        (blue (string_of_float v))
-        (grey (string_of_float ma))
+        (grey ?colors (string_of_float mi))
+        (blue ?colors (string_of_float v))
+        (grey ?colors (string_of_float ma))
   | MIntRange (mi, v, ma) ->
       Printf.fprintf oc " %s.. %s ..%s"
-        (grey (string_of_int mi))
-        (blue (string_of_int v))
-        (grey (string_of_int ma))
+        (grey ?colors (string_of_int mi))
+        (blue ?colors (string_of_int v))
+        (grey ?colors (string_of_int ma))
   | MString v ->
-      Printf.fprintf oc " %s" (blue v)
+      Printf.fprintf oc " %s" (blue ?colors v)
   | MHistogram (v, _) ->
       let v = Array.map (fun (mi, ma, n) ->
                 Printf.sprintf "%f..%f" mi ma,
@@ -638,20 +641,20 @@ let display_measure oc = function
       let max_bar_len = window_width - max_intv - max_count - 8 in
       Array.print ~first:"\n" ~last:"" ~sep:"\n" (fun oc (intv, count, n) ->
         let bar = make_bar n max_n max_bar_len in
-        Printf.fprintf oc "    %*s: %s %s" max_intv intv bar (blue count)) oc v
+        Printf.fprintf oc "    %*s: %s %s" max_intv intv bar (blue ?colors count)) oc v
 
-let display_metric oc metric =
+let display_metric ?colors oc metric =
   List.print ~first:"  " ~last:" ->" ~sep:", " (fun oc (n, v) ->
-    Printf.fprintf oc "%s: %s" (green n) (yellow v)) oc metric.labels ;
-  display_measure oc metric.measure
+    Printf.fprintf oc "%s: %s" (green ?colors n) (yellow ?colors v)) oc metric.labels ;
+  display_measure ?colors oc metric.measure
 
-let display_console () =
+let display_console ?colors () =
   iter (fun name help export ->
-    Printf.printf "%s (%s)\n" (white help) (grey name) ;
+    Printf.printf "%s (%s)\n" (white ?colors help) (grey ?colors name) ;
     match export () with
     | [] -> Printf.printf "  no information\n\n"
     | metrics ->
-        List.print ~first:"" ~last:"\n\n" ~sep:"\n" display_metric
+        List.print ~first:"" ~last:"\n\n" ~sep:"\n" (display_metric ?colors)
           stdout metrics
   ) ;
   Printf.printf "%!"
