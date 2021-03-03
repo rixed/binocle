@@ -571,6 +571,15 @@ struct
 end
 
 (*
+ * Utility functions to access the metrics:
+ *)
+
+let iter f =
+  Hashtbl.iter (fun name (help, export) ->
+    f name help export
+  ) all_measures
+
+(*
  * Utility functions to print (on console) all known metrics:
  *)
 
@@ -637,14 +646,14 @@ let display_metric oc metric =
   display_measure oc metric.measure
 
 let display_console () =
-  Hashtbl.iter (fun name (help, export) ->
+  iter (fun name help export ->
     Printf.printf "%s (%s)\n" (white help) (grey name) ;
     match export () with
     | [] -> Printf.printf "  no information\n\n"
     | metrics ->
         List.print ~first:"" ~last:"\n\n" ~sep:"\n" display_metric
           stdout metrics
-  ) all_measures ;
+  ) ;
   Printf.printf "%!"
 
 (*
